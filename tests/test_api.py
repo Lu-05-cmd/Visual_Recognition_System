@@ -27,6 +27,32 @@ def test_app_factory_uses_isolated_settings_and_storage(tmp_path: Path) -> None:
     assert client.get("/api/shapes/library").status_code == 200
 
 
+def test_feature_routers_preserve_existing_api_paths(tmp_path: Path) -> None:
+    settings = Settings(
+        _env_file=None,
+        shape_library_path=tmp_path / "library.sqlite3",
+        neural_shape_model_path=tmp_path / "missing-model.pt",
+    )
+    app = create_app(settings, video_results=tmp_path / "results")
+    client = TestClient(app)
+
+    expected_paths = {
+        "/",
+        "/health",
+        "/api/reset",
+        "/api/camera/frame",
+        "/api/video/process",
+        "/api/video/result/{filename}",
+        "/api/shapes/library",
+        "/api/shapes/samples",
+        "/api/shapes/samples/{sample_id}",
+        "/api/shapes/images/{label}/{filename}",
+    }
+
+    assert expected_paths <= set(app.openapi()["paths"])
+    assert client.get("/api/video/result/missing.mp4").status_code == 404
+
+
 def test_reset_only_removes_results_from_its_app(tmp_path: Path) -> None:
     settings = Settings(
         _env_file=None,

@@ -16,9 +16,9 @@ Các service được tách riêng để thay detector bằng YOLO/ONNX hoặc n
 
 ### Kiến trúc và ranh giới module
 
-- `api.py` cung cấp `create_app()` để tạo FastAPI app với settings, kho mẫu và thư mục video có thể cấu hình/tiêm vào khi kiểm thử. `visual_system.api:app` vẫn là entry point tương thích cho Uvicorn.
+- `api/` chứa app factory và router riêng cho health, camera, video, kho hình dạng và dashboard. Có thể truyền settings/storage vào `create_app()` để kiểm thử; `visual_system.api:app` vẫn là entry point tương thích cho Uvicorn.
 - `VisionPipeline` điều phối detector, nhận dạng màu/hình dạng, tracking và inspector. Detector cung cấp `create_detection_masks()` như giao diện mask công khai; pipeline không cần gọi phương thức private của detector.
-- `services/` chứa các tích hợp và thuật toán độc lập; `models.py` chứa cấu trúc dữ liệu dùng chung. Tái cấu trúc tiếp theo sẽ tách API thành router và đưa hợp đồng tích hợp vào interface riêng khi có adapter thứ hai cần dùng chúng.
+- `services/` chứa các tích hợp và thuật toán độc lập; `models.py` chứa cấu trúc dữ liệu dùng chung. Hợp đồng detector bắt đầu từ giao diện mask công khai; có thể đưa vào interface riêng khi bổ sung adapter detector thứ hai.
 
 Mọi lần tái cấu trúc cần giữ hành vi API hiện tại và có test cho app được tạo với storage riêng, để chạy nhiều cấu hình test không đụng dữ liệu mặc định trong `data/`.
 
