@@ -25,7 +25,7 @@ class ColorBlobDetector:
         max_area = max(1, int(frame_area * min(self.max_frame_coverage, 0.65)))
         min_area = min(self.min_area, max(100, round(frame_area * 0.0006)))
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        detection_masks = masks if masks is not None else self._create_detection_masks(frame)
+        detection_masks = masks if masks is not None else self.create_detection_masks(frame)
         for mask_index, mask in enumerate(detection_masks):
             neutral_mask = mask_index == len(detection_masks) - 1
             allowed_area = min(max_area, round(frame_area * 0.3)) if neutral_mask else max_area
@@ -50,7 +50,6 @@ class ColorBlobDetector:
                     # Broad hue bands overlap at their boundaries. Split this
                     # region using its own dominant hue before shape analysis.
                     dominant_hue = int(np.median(object_hue))
-                    refined = np.zeros(mask.shape, dtype=np.uint8)
                     hue_mask = cv2.inRange(
                         hsv,
                         (max(0, dominant_hue - 12), 45, 25),
@@ -179,7 +178,7 @@ class ColorBlobDetector:
         return intersection / max(inner.width * inner.height, 1)
 
     @staticmethod
-    def _create_detection_masks(frame: np.ndarray) -> list[np.ndarray]:
+    def create_detection_masks(frame: np.ndarray) -> list[np.ndarray]:
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         color_masks: list[np.ndarray] = []
         hue_ranges = (
@@ -208,6 +207,10 @@ class ColorBlobDetector:
         if active_color_masks:
             return [*active_color_masks, foreground_mask]
         return [foreground_mask]
+
+    @staticmethod
+    def _create_detection_masks(frame: np.ndarray) -> list[np.ndarray]:
+        return ColorBlobDetector.create_detection_masks(frame)
 
     @staticmethod
     def _neutral_foreground_mask(hsv: np.ndarray) -> np.ndarray:

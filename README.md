@@ -14,6 +14,14 @@ Nền tảng hệ thống thị giác máy tính công nghiệp tự động ph�
 
 Các service được tách riêng để thay detector bằng YOLO/ONNX hoặc nối camera công nghiệp mà không đổi API pipeline.
 
+### Kiến trúc và ranh giới module
+
+- `api.py` cung cấp `create_app()` để tạo FastAPI app với settings, kho mẫu và thư mục video có thể cấu hình/tiêm vào khi kiểm thử. `visual_system.api:app` vẫn là entry point tương thích cho Uvicorn.
+- `VisionPipeline` điều phối detector, nhận dạng màu/hình dạng, tracking và inspector. Detector cung cấp `create_detection_masks()` như giao diện mask công khai; pipeline không cần gọi phương thức private của detector.
+- `services/` chứa các tích hợp và thuật toán độc lập; `models.py` chứa cấu trúc dữ liệu dùng chung. Tái cấu trúc tiếp theo sẽ tách API thành router và đưa hợp đồng tích hợp vào interface riêng khi có adapter thứ hai cần dùng chúng.
+
+Mọi lần tái cấu trúc cần giữ hành vi API hiện tại và có test cho app được tạo với storage riêng, để chạy nhiều cấu hình test không đụng dữ liệu mặc định trong `data/`.
+
 ## Cài đặt
 
 Yêu cầu Python 3.11+.

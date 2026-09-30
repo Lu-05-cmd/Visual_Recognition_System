@@ -12,7 +12,10 @@ def test_pipeline_detects_colors_and_assigns_tracks() -> None:
     cv2.rectangle(frame, (40, 80), (140, 180), (0, 0, 255), -1)
     cv2.circle(frame, (300, 130), 50, (0, 255, 0), -1)
 
-    result = VisionPipeline(min_area=100).process(frame)
+    pipeline = VisionPipeline(min_area=100)
+    result = pipeline.process(frame)
+    for _ in range(2):
+        result = pipeline.process(frame)
 
     assert len(result.detections) == 2
     assert {item.color for item in result.detections} == {"red", "green"}
@@ -26,7 +29,10 @@ def test_pipeline_detects_neutral_object_against_light_background() -> None:
     frame = np.full((240, 320, 3), 230, dtype=np.uint8)
     cv2.rectangle(frame, (80, 60), (200, 180), (90, 90, 90), -1)
 
-    result = VisionPipeline(min_area=100).process(frame)
+    pipeline = VisionPipeline(min_area=100)
+    result = pipeline.process(frame)
+    for _ in range(2):
+        result = pipeline.process(frame)
 
     assert len(result.detections) == 1
     assert result.detections[0].shape == "square"
@@ -44,7 +50,10 @@ def test_pipeline_detects_edge_objects_on_a_conveyor_without_using_belt_as_shape
     cv2.rectangle(frame, (455, 76), (495, 115), (0, 140, 220), -1)
     cv2.circle(frame, (555, 96), 19, (25, 35, 222), -1)
 
-    result = VisionPipeline(min_area=400).process(frame)
+    pipeline = VisionPipeline(min_area=400)
+    result = pipeline.process(frame)
+    for _ in range(2):
+        result = pipeline.process(frame)
 
     assert len(result.detections) == 7
     assert result.detections[0].bounding_box.x == 0
@@ -76,7 +85,10 @@ def test_pipeline_ignores_conveyor_as_object_and_finds_small_purple_object():
     cv2.rectangle(frame, (365, 158), (378, 194), (100, 10, 140), -1)
     cv2.circle(frame, (430, 176), 11, (170, 20, 245), -1)
 
-    result = VisionPipeline(min_area=400).process(frame)
+    pipeline = VisionPipeline(min_area=400)
+    result = pipeline.process(frame)
+    for _ in range(2):
+        result = pipeline.process(frame)
 
     assert len(result.detections) == 3
     assert [item.color for item in result.detections] == ["red", "purple", "purple"]
@@ -241,6 +253,31 @@ def test_shape_recognizer_identifies_shaded_polyhedral_solids() -> None:
     assert _solid_shape(cube) == "box"
     assert _solid_shape(rectangular_box) == "box"
     assert _solid_shape(cone) == "cone"
+
+
+def test_shape_recognizer_identifies_front_facing_square_box_with_side_face() -> None:
+    frame = np.zeros((140, 140, 3), dtype=np.uint8)
+    cv2.rectangle(frame, (35, 35), (100, 105), (0, 0, 190), -1)
+    cv2.fillPoly(
+        frame,
+        [np.array([(100, 35), (116, 45), (116, 115), (100, 105)])],
+        (0, 0, 85),
+    )
+    cv2.fillPoly(
+        frame,
+        [np.array([(35, 35), (51, 25), (116, 45), (100, 35)])],
+        (0, 0, 225),
+    )
+
+    assert _solid_shape(frame) == "box"
+
+
+def test_plain_long_rectangle_is_not_misclassified_as_cylinder() -> None:
+    frame = np.zeros((160, 120, 3), dtype=np.uint8)
+    cv2.rectangle(frame, (35, 25), (85, 135), (0, 0, 190), -1)
+    cv2.rectangle(frame, (62, 25), (85, 135), (0, 0, 95), -1)
+
+    assert _solid_shape(frame) != "cylinder"
 
 
 def test_shape_recognizer_uses_nearest_colored_object_when_objects_share_frame() -> None:

@@ -29,7 +29,7 @@ class VisionPipeline:
         self._frame_id = 0
 
     def process(self, frame: np.ndarray) -> FrameResult:
-        masks = self.detector._create_detection_masks(frame)
+        masks = self.detector.create_detection_masks(frame)
         detections = self.detector.detect(frame, masks)
         self.color_recognizer.recognize(frame, detections)
         self.shape_recognizer.recognize(frame, detections, masks, self.shape_library)

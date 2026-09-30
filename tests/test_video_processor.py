@@ -106,6 +106,29 @@ def test_annotations_stay_inside_frame_for_objects_at_edges() -> None:
     assert np.any(frame[-1, :] != 0)
 
 
+def test_wrapped_label_uses_consistent_readable_text_color() -> None:
+    frame = np.zeros((180, 120, 3), dtype=np.uint8)
+    VideoProcessor._draw_label(
+        frame,
+        ("XANH LA | DAT",),
+        10,
+        90,
+        52,
+        (35, 105, 25),
+        (40, 150, 95),
+        below=True,
+        text_color=(255, 255, 255),
+    )
+
+    panel = frame[90:180, 10:62]
+    assert np.count_nonzero(np.all(panel == (35, 105, 25), axis=2)) > 0
+    assert np.count_nonzero(np.all(panel == (255, 255, 255), axis=2)) > 0
+
+
+def test_status_panel_text_contrast_is_independent_from_pass_color() -> None:
+    assert VideoProcessor._status_panel_color("pass") != (40, 150, 95)
+
+
 def test_shape_names_distinguish_solid_types() -> None:
     expected_names = {
         "box": "KHOI HOP",
@@ -122,6 +145,29 @@ def test_shape_names_distinguish_solid_types() -> None:
             solid_shape=solid_shape,
         )
         assert VideoProcessor._shape_name(detection) == shape_name
+
+
+def test_annotation_font_scales_for_high_resolution_frames() -> None:
+    small = np.zeros((360, 640, 3), dtype=np.uint8)
+    large = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    detection = Detection(
+        label="product",
+        confidence=0.95,
+        bounding_box=BoundingBox(200, 200, 300, 300),
+        color="blue",
+        solid_shape="box",
+    )
+
+    VideoProcessor._draw_annotations(small, [detection])
+    VideoProcessor._draw_annotations(large, [detection])
+
+    small_label = np.zeros((360, 640, 3), dtype=np.uint8)
+    large_label = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    VideoProcessor._draw_label(small_label, ("KHOI HOP",), 30, 120, 90, (255, 150, 40), (0, 0, 255))
+    VideoProcessor._draw_label(large_label, ("KHOI HOP",), 30, 120, 250, (255, 150, 40), (0, 0, 255))
+    small_height = np.count_nonzero(np.any(small_label[:120, 30:280] != 0, axis=2))
+    large_height = np.count_nonzero(np.any(large_label[:120, 30:280] != 0, axis=2))
+    assert large_height > small_height
 
 
 def test_solid_annotation_does_not_display_conflicting_outline() -> None:
@@ -155,7 +201,24 @@ def test_shape_serial_is_above_color_and_inspection_labels() -> None:
     upper_band = frame[50:80, 40:141]
     lower_band = frame[181:211, 40:141]
     assert np.any(np.all(upper_band == shape_color, axis=2))
-    assert np.any(np.all(lower_band == status_color, axis=2))
+    assert np.any(np.all(lower_band == VideoProcessor._status_panel_color("pass"), axis=2))
+
+
+def test_shape_label_prefixes_serial_with_hash() -> None:
+    frame = np.zeros((120, 180, 3), dtype=np.uint8)
+    detection = Detection(
+        label="product",
+        confidence=0.95,
+        bounding_box=BoundingBox(30, 50, 100, 50),
+        color="blue",
+        solid_shape="box",
+        serial_number=12,
+    )
+
+    VideoProcessor._draw_annotations(frame, [detection])
+
+    label_region = frame[0:50, 30:130]
+    assert np.count_nonzero(label_region) > 0
 
 
 def test_serial_numbers_start_independently_for_each_color() -> None:

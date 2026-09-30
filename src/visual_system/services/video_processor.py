@@ -271,7 +271,8 @@ class VideoProcessor:
             y1 = min(max(box.y, 0), max(frame_height - 1, 0))
             x2 = min(max(box.x + box.width, x1), max(frame_width - 1, 0))
             y2 = min(max(box.y + box.height, y1), max(frame_height - 1, 0))
-            cv2.rectangle(frame, (x1, y1), (x2, y2), region_color, 3)
+            box_thickness = max(2, round(min(frame_height, frame_width) / 180))
+            cv2.rectangle(frame, (x1, y1), (x2, y2), region_color, box_thickness)
             status_color = (
                 (40, 150, 95)
                 if detection.inspection.value == "pass"
@@ -282,13 +283,14 @@ class VideoProcessor:
                 frame,
                 (
                     f"{VideoProcessor._shape_name(detection)} - "
-                    f"{detection.serial_number or detection.track_id or 0}",
+                    f"#{detection.serial_number or detection.track_id or 0}",
                 ),
                 x1,
                 y1,
                 box_width,
                 region_color,
                 status_color,
+                text_color=(18, 30, 30),
             )
             VideoProcessor._draw_label(
                 frame,
@@ -299,9 +301,10 @@ class VideoProcessor:
                 x1,
                 y2 + 1,
                 box_width,
-                status_color,
+                VideoProcessor._status_panel_color(detection.inspection.value),
                 status_color,
                 below=True,
+                text_color=(255, 255, 255),
             )
 
     @staticmethod
@@ -353,36 +356,46 @@ class VideoProcessor:
         background,
         status_color,
         below=False,
+        text_color=(18, 30, 30),
+        bold=True,
     ) -> None:
         frame_height, frame_width = frame.shape[:2]
         font = cv2.FONT_HERSHEY_SIMPLEX
-        available_width = min(box_width, frame_width - box_x)
-        scale = max(0.15, min(0.5, available_width / 190, frame_height / 120))
-        thickness = 2
-        padding_x = 5
-        padding_y = 3
+        minimum_label_width = 96 if below else 72
+        available_width = min(max(box_width, minimum_label_width), frame_width - box_x)
+        # Scale labels with the source video; small fixed labels become
+        # unreadable when the video is displayed at full resolution.
+        scale = max(0.35, min(1.0, available_width / 110, frame_height / 100))
+        thickness = max(2, round(scale * (3 if bold else 2)))
+        padding_x = max(4, round(scale * 7))
+        padding_y = max(3, round(scale * 5))
         max_text_width = max(1, available_width - 2 * padding_x)
         fitted_lines: list[str] = []
         for line in lines:
             current = ""
             for word in line.split():
-                candidate = f"{current} {word}".strip()
-                if cv2.getTextSize(candidate, font, scale, thickness)[0][0] <= max_text_width:
-                    current = candidate
-                    continue
-                if current:
-                    fitted_lines.append(current)
-                current = word
-                while (
-                    current
-                    and cv2.getTextSize(current, font, scale, thickness)[0][0] > max_text_width
-                ):
-                    current = current[:-1]
+                chunks = [word]
+                while cv2.getTextSize(chunks[-1], font, scale, thickness)[0][0] > max_text_width:
+                    chunk = chunks[-1]
+                    split_at = max(1, len(chunk) - 1)
+                    while split_at > 1 and cv2.getTextSize(
+                        chunk[:split_at], font, scale, thickness
+                    )[0][0] > max_text_width:
+                        split_at -= 1
+                    chunks[-1:] = [chunk[:split_at], chunk[split_at:]]
+                for chunk in chunks:
+                    candidate = f"{current} {chunk}".strip()
+                    if cv2.getTextSize(candidate, font, scale, thickness)[0][0] <= max_text_width:
+                        current = candidate
+                    else:
+                        if current:
+                            fitted_lines.append(current)
+                        current = chunk
             if current:
                 fitted_lines.append(current)
 
         text_height = cv2.getTextSize("Ag", font, scale, thickness)[0][1]
-        line_height = text_height + 4
+        line_height = text_height + max(4, round(scale * 6))
         panel_width = available_width
         panel_height = len(fitted_lines) * line_height + 2 * padding_y
         panel_x = box_x
@@ -396,7 +409,6 @@ class VideoProcessor:
             -1,
         )
         for index, line in enumerate(fitted_lines):
-            text_color = (18, 30, 30) if index == 0 else status_color
             baseline = panel_y + padding_y + (index + 1) * line_height - 3
             cv2.putText(
                 frame,
@@ -408,6 +420,14 @@ class VideoProcessor:
                 thickness,
                 cv2.LINE_AA,
             )
+
+    @staticmethod
+    def _status_panel_color(status: str) -> tuple[int, int, int]:
+        if status == "pass":
+            return (35, 105, 25)
+        if status == "fail":
+            return (0, 0, 150)
+        return (70, 70, 70)
 
     @staticmethod
     def _color_for_detection(color_name: str) -> tuple[int, int, int]:

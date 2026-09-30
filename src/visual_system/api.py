@@ -5,58 +5,81 @@ from uuid import uuid4
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, Response
 
-from visual_system.config import get_settings
+from visual_system.config import Settings, get_settings
 from visual_system.pipeline import VisionPipeline
 from visual_system.schemas import VideoProcessResponse, VideoSummaryResponse
 from visual_system.services.shape_library import SHAPE_LABELS, ShapeFeatureLibrary
 from visual_system.services.video_processor import VideoProcessor
 
-settings = get_settings()
-shape_library = ShapeFeatureLibrary(settings.shape_library_path)
-pipeline = VisionPipeline(
-    settings.detection_min_area,
-    settings.track_max_distance,
-    settings.track_max_missed_frames,
-    shape_library,
-    settings.neural_shape_model_path,
-)
-camera_pipeline = VisionPipeline(
-    settings.detection_min_area,
-    settings.track_max_distance,
-    settings.track_max_missed_frames,
-    shape_library,
-    settings.neural_shape_model_path,
-)
-app = FastAPI(title=settings.app_name, version="0.1.0")
-video_results = Path(gettempdir()) / "vision-system-results"
-video_results.mkdir(exist_ok=True)
+router = APIRouter()
 
 
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "environment": settings.environment}
+def create_app(
+    settings: Settings | None = None,
+    *,
+    shape_library: ShapeFeatureLibrary | None = None,
+    video_results: Path | None = None,
+) -> FastAPI:
+    settings = settings if settings is not None else get_settings()
+    shape_library = (
+        shape_library
+        if shape_library is not None
+        else ShapeFeatureLibrary(settings.shape_library_path)
+    )
+    video_results = (
+        video_results
+        if video_results is not None
+        else Path(gettempdir()) / "vision-system-results"
+    )
+    video_results.mkdir(parents=True, exist_ok=True)
+
+    app = FastAPI(title=settings.app_name, version="0.1.0")
+    app.state.settings = settings
+    app.state.shape_library = shape_library
+    app.state.pipeline = VisionPipeline(
+        settings.detection_min_area,
+        settings.track_max_distance,
+        settings.track_max_missed_frames,
+        shape_library,
+        settings.neural_shape_model_path,
+    )
+    app.state.camera_pipeline = VisionPipeline(
+        settings.detection_min_area,
+        settings.track_max_distance,
+        settings.track_max_missed_frames,
+        shape_library,
+        settings.neural_shape_model_path,
+    )
+    app.state.video_results = video_results
+    app.include_router(router)
+    return app
 
 
-@app.post("/api/reset")
-def reset_system() -> dict[str, str]:
-    pipeline.reset()
-    camera_pipeline.reset()
-    for result_path in video_results.glob("*-annotated.mp4"):
+@router.get("/health")
+def health(request: Request) -> dict[str, str]:
+    return {"status": "ok", "environment": request.app.state.settings.environment}
+
+
+@router.post("/api/reset")
+def reset_system(request: Request) -> dict[str, str]:
+    request.app.state.pipeline.reset()
+    request.app.state.camera_pipeline.reset()
+    for result_path in request.app.state.video_results.glob("*-annotated.mp4"):
         result_path.unlink(missing_ok=True)
     return {"status": "reset"}
 
 
-@app.post("/api/camera/frame")
-async def process_camera_frame(file: UploadFile = File(...)) -> Response:
+@router.post("/api/camera/frame")
+async def process_camera_frame(request: Request, file: UploadFile = File(...)) -> Response:
     payload = await file.read()
     frame = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
     if frame is None:
         raise HTTPException(status_code=400, detail="Frame camera không hợp lệ")
 
-    result = camera_pipeline.process(frame)
+    result = request.app.state.camera_pipeline.process(frame)
     VideoProcessor._draw_annotations(frame, result.detections)
     encoded, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
     if not encoded:
@@ -64,8 +87,9 @@ async def process_camera_frame(file: UploadFile = File(...)) -> Response:
     return Response(content=buffer.tobytes(), media_type="image/jpeg")
 
 
-@app.post("/api/video/process", response_model=VideoProcessResponse)
+@router.post("/api/video/process", response_model=VideoProcessResponse)
 async def process_video(
+    request: Request,
     file: UploadFile = File(...),
     color: str | None = None,
 ) -> VideoProcessResponse:
@@ -87,6 +111,9 @@ async def process_video(
 
     suffix = Path(file.filename or "input.mp4").suffix.lower() or ".mp4"
     job_id = uuid4().hex
+    video_results = request.app.state.video_results
+    settings = request.app.state.settings
+    shape_library = request.app.state.shape_library
     input_path = video_results / f"{job_id}{suffix}"
     output_path = video_results / f"{job_id}-annotated.mp4"
     processing_started = perf_counter()
@@ -112,8 +139,9 @@ async def process_video(
     )
 
 
-@app.get("/api/video/result/{filename}")
-def video_result(filename: str) -> FileResponse:
+@router.get("/api/video/result/{filename}")
+def video_result(request: Request, filename: str) -> FileResponse:
+    video_results = request.app.state.video_results
     result_path = video_results / filename
     if not result_path.is_file() or result_path.parent != video_results:
         raise FileNotFoundError("Không tìm thấy video kết quả")
@@ -125,16 +153,19 @@ def video_result(filename: str) -> FileResponse:
     )
 
 
-@app.get("/api/shapes/library")
-def get_shape_library() -> dict:
+@router.get("/api/shapes/library")
+def get_shape_library(request: Request) -> dict:
+    shape_library = request.app.state.shape_library
     return shape_library.summary()
 
 
-@app.post("/api/shapes/samples")
+@router.post("/api/shapes/samples")
 async def add_shape_sample(
+    request: Request,
     files: list[UploadFile] = File(...),
     label: str = Form(...),
 ) -> dict:
+    shape_library = request.app.state.shape_library
     normalized_label = label.strip().lower()
     if normalized_label not in SHAPE_LABELS:
         raise HTTPException(
@@ -186,16 +217,17 @@ async def add_shape_sample(
     }
 
 
-@app.delete("/api/shapes/samples/{sample_id}")
-def delete_shape_sample(sample_id: int) -> dict:
+@router.delete("/api/shapes/samples/{sample_id}")
+def delete_shape_sample(request: Request, sample_id: int) -> dict:
+    shape_library = request.app.state.shape_library
     label = shape_library.delete_sample(sample_id)
     if label is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy ảnh mẫu")
     return {"id": sample_id, "label": label, "deleted": True}
 
 
-@app.get("/api/shapes/images/{label}/{filename}")
-def get_shape_sample_image(label: str, filename: str) -> FileResponse:
+@router.get("/api/shapes/images/{label}/{filename}")
+def get_shape_sample_image(request: Request, label: str, filename: str) -> FileResponse:
     if (
         label not in SHAPE_LABELS
         or len(filename) != 68
@@ -203,12 +235,15 @@ def get_shape_sample_image(label: str, filename: str) -> FileResponse:
         or not all(character in "0123456789abcdef" for character in filename[:-4])
     ):
         raise HTTPException(status_code=404, detail="Không tìm thấy ảnh mẫu")
-    image_path = shape_library.image_root / label / filename
+    image_path = request.app.state.shape_library.image_root / label / filename
     if not image_path.is_file():
         raise HTTPException(status_code=404, detail="Không tìm thấy ảnh mẫu")
     return FileResponse(image_path, media_type="image/png")
 
 
-@app.get("/", response_class=HTMLResponse)
+@router.get("/", response_class=HTMLResponse)
 def dashboard() -> str:
     return Path(__file__).with_name("dashboard.html").read_text(encoding="utf-8")
+
+
+app = create_app()

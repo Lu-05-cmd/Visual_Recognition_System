@@ -216,6 +216,7 @@ class ShapeRecognizer:
         color_spread = float(np.max(np.std(object_pixels, axis=0))) if object_pixels.size else 0.0
         has_internal_facets = cls._has_internal_facets(gray, object_mask, width, height)
         has_cylinder_rim = cls._has_horizontal_rim(gray, object_mask, width, height)
+        has_rounded_ends = cls._has_rounded_cylinder_ends(contour, width, height)
 
         # Uniformly colored silhouettes do not provide depth evidence. Avoid
         # labeling a flat square as a cube from its four contour vertices.
@@ -235,13 +236,38 @@ class ShapeRecognizer:
                 or cls._has_cone_shading(gray, object_mask, cv2.boundingRect(contour))
                 else "unknown"
             )
-        if aspect_ratio >= 1.3 and (has_elliptical_rim or has_cylinder_rim):
-            return "cylinder"
-        if aspect_ratio >= 2.0 and vertex_count >= 5 and color_spread < 2:
+        # A cylinder needs a rounded end cue. A plain elongated rectangle is
+        # not enough because box faces and shadows often create the same ratio.
+        if aspect_ratio >= 1.15 and (
+            has_elliptical_rim or has_cylinder_rim or (has_rounded_ends and not has_internal_facets)
+        ):
             return "cylinder"
         if has_internal_facets and vertex_count in {4, 5, 6}:
             return "box"
         return "unknown"
+
+    @staticmethod
+    def _has_rounded_cylinder_ends(contour: np.ndarray, width: int, height: int) -> bool:
+        """Detect matching rounded caps at both ends of a tall silhouette."""
+        if height < width * 1.15 or width < 20:
+            return False
+        x, y, _, _ = cv2.boundingRect(contour)
+        points = contour[:, 0, :]
+        normalized_y = (points[:, 1] - y) / max(height, 1)
+        top = points[normalized_y <= 0.2]
+        bottom = points[normalized_y >= 0.8]
+        if len(top) < 5 or len(bottom) < 5:
+            return False
+        top_span = int(top[:, 0].max() - top[:, 0].min())
+        bottom_span = int(bottom[:, 0].max() - bottom[:, 0].min())
+        top_center = float((top[:, 0].max() + top[:, 0].min()) / 2)
+        bottom_center = float((bottom[:, 0].max() + bottom[:, 0].min()) / 2)
+        return (
+            top_span >= width * 0.72
+            and bottom_span >= width * 0.72
+            and abs(top_span - bottom_span) <= width * 0.3
+            and abs(top_center - bottom_center) <= width * 0.2
+        )
 
     @staticmethod
     def _has_internal_facets(
@@ -258,7 +284,7 @@ class ShapeRecognizer:
             cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
         )
         edges = cv2.bitwise_and(cv2.Canny(gray, 45, 130), interior)
-        min_line = max(12, round(min(width, height) * 0.24))
+        min_line = max(8, round(min(width, height) * 0.16))
         lines = cv2.HoughLinesP(
             edges,
             1,
@@ -272,7 +298,8 @@ class ShapeRecognizer:
         for line in np.asarray(lines).reshape(-1, 4):
             x1, y1, x2, y2 = (int(value) for value in line)
             angle = abs(np.degrees(np.arctan2(y2 - y1, x2 - x1))) % 180
-            if 18 <= angle <= 162:
+            line_length = float(np.hypot(x2 - x1, y2 - y1))
+            if 18 <= angle <= 162 and line_length >= min(width, height) * 0.16:
                 return True
         return False
 
