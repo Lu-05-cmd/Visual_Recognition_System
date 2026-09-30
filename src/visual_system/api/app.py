@@ -1,11 +1,13 @@
 from pathlib import Path
 from tempfile import gettempdir
+from typing import Callable
 
 from fastapi import FastAPI
 
 from visual_system.api.routers import router
 from visual_system.config import Settings, get_settings
 from visual_system.pipeline import VisionPipeline
+from visual_system.ports import Detector
 from visual_system.services.shape_library import ShapeFeatureLibrary
 
 
@@ -14,6 +16,7 @@ def create_app(
     *,
     shape_library: ShapeFeatureLibrary | None = None,
     video_results: Path | None = None,
+    detector_factory: Callable[[], Detector] | None = None,
 ) -> FastAPI:
     settings = settings if settings is not None else get_settings()
     shape_library = (
@@ -37,6 +40,7 @@ def create_app(
         settings.track_max_missed_frames,
         shape_library,
         settings.neural_shape_model_path,
+        detector_factory() if detector_factory is not None else None,
     )
     app.state.camera_pipeline = VisionPipeline(
         settings.detection_min_area,
@@ -44,7 +48,9 @@ def create_app(
         settings.track_max_missed_frames,
         shape_library,
         settings.neural_shape_model_path,
+        detector_factory() if detector_factory is not None else None,
     )
     app.state.video_results = video_results
+    app.state.detector_factory = detector_factory
     app.include_router(router)
     return app

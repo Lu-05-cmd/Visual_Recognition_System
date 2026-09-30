@@ -3,8 +3,27 @@ import numpy as np
 
 from visual_system.models import BoundingBox, Detection
 from visual_system.pipeline import VisionPipeline
+from visual_system.ports import Detector
 from visual_system.services.shape_recognizer import ShapeRecognizer
 from visual_system.services.tracker import CentroidTracker
+
+
+def test_pipeline_uses_injected_detector() -> None:
+    class EmptyDetector:
+        def __init__(self) -> None:
+            self.received_frame = None
+
+        def detect(self, frame: np.ndarray) -> list[Detection]:
+            self.received_frame = frame
+            return []
+
+    detector: Detector = EmptyDetector()
+    frame = np.zeros((40, 60, 3), dtype=np.uint8)
+    result = VisionPipeline(detector=detector).process(frame)
+
+    assert result.detections == []
+    assert isinstance(detector, EmptyDetector)
+    assert detector.received_frame is frame
 
 
 def test_pipeline_detects_colors_and_assigns_tracks() -> None:

@@ -60,6 +60,43 @@ def test_video_processor_passes_neural_checkpoint_to_frame_pipeline(
     assert observed["neural_model_path"] == checkpoint
 
 
+def test_video_processor_uses_injected_detector_factory(tmp_path, monkeypatch) -> None:
+    input_path = tmp_path / "detector-input.mp4"
+    output_path = tmp_path / "detector-output.mp4"
+    writer = cv2.VideoWriter(
+        str(input_path), cv2.VideoWriter_fourcc(*"mp4v"), 10.0, (80, 60)
+    )
+    writer.write(np.zeros((60, 80, 3), dtype=np.uint8))
+    writer.release()
+    observed = {}
+
+    class EmptyDetector:
+        def detect(self, frame: np.ndarray) -> list[Detection]:
+            return []
+
+    detector = EmptyDetector()
+
+    def detector_factory() -> EmptyDetector:
+        return detector
+
+    real_pipeline = video_processor_module.VisionPipeline
+
+    def pipeline_factory(*args, **kwargs):
+        observed.update(kwargs)
+        return real_pipeline(*args, **kwargs)
+
+    monkeypatch.setattr(video_processor_module, "VisionPipeline", pipeline_factory)
+
+    VideoProcessor(
+        100,
+        80.0,
+        10,
+        detector_factory=detector_factory,
+    ).process(input_path, output_path)
+
+    assert observed["detector"] is detector
+
+
 def test_video_processor_skips_repeated_frames_without_splitting_track(tmp_path) -> None:
     input_path = tmp_path / "repeated-input.mp4"
     output_path = tmp_path / "repeated-annotated.mp4"

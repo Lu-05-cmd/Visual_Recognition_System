@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from visual_system.api import create_app
 from visual_system.config import Settings
+from visual_system.models import Detection
 
 
 def test_app_factory_uses_isolated_settings_and_storage(tmp_path: Path) -> None:
@@ -25,6 +26,36 @@ def test_app_factory_uses_isolated_settings_and_storage(tmp_path: Path) -> None:
     assert client.get("/health").json() == {"status": "ok", "environment": "test"}
     assert client.get("/").status_code == 200
     assert client.get("/api/shapes/library").status_code == 200
+
+
+def test_app_factory_creates_separate_detectors_per_pipeline(tmp_path: Path) -> None:
+    class EmptyDetector:
+        def detect(self, frame: np.ndarray) -> list[Detection]:
+            return []
+
+    created: list[EmptyDetector] = []
+
+    def detector_factory() -> EmptyDetector:
+        detector = EmptyDetector()
+        created.append(detector)
+        return detector
+
+    settings = Settings(
+        _env_file=None,
+        shape_library_path=tmp_path / "library.sqlite3",
+        neural_shape_model_path=tmp_path / "missing-model.pt",
+    )
+    app = create_app(
+        settings,
+        video_results=tmp_path / "results",
+        detector_factory=detector_factory,
+    )
+
+    assert len(created) == 2
+    assert app.state.pipeline.detector is created[0]
+    assert app.state.camera_pipeline.detector is created[1]
+    assert created[0] is not created[1]
+    assert app.state.detector_factory is detector_factory
 
 
 def test_feature_routers_preserve_existing_api_paths(tmp_path: Path) -> None:

@@ -3,12 +3,14 @@ import subprocess
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import cv2
 import numpy as np
 
 from visual_system.models import InspectionStatus
 from visual_system.pipeline import VisionPipeline
+from visual_system.ports import Detector
 from visual_system.services.shape_library import ShapeFeatureLibrary
 
 
@@ -40,10 +42,12 @@ class VideoProcessor:
         max_missed_frames: int,
         shape_library: ShapeFeatureLibrary | None = None,
         neural_model_path: str | Path | None = None,
+        detector_factory: Callable[[], Detector] | None = None,
     ) -> None:
         self.pipeline_config = (min_area, max_distance, max_missed_frames)
         self.shape_library = shape_library
         self.neural_model_path = neural_model_path
+        self.detector_factory = detector_factory
 
     def process(
         self,
@@ -74,6 +78,11 @@ class VideoProcessor:
             *self.pipeline_config,
             shape_library=self.shape_library,
             neural_model_path=self.neural_model_path,
+            detector=(
+                self.detector_factory()
+                if self.detector_factory is not None
+                else None
+            ),
         )
         tracks: set[int] = set()
         serials_by_track: dict[int, int] = {}

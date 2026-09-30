@@ -51,6 +51,7 @@ async def process_video(
             settings.track_max_missed_frames,
             shape_library,
             settings.neural_shape_model_path,
+            request.app.state.detector_factory,
         ).process(input_path, output_path, target_color=target_color)
     finally:
         input_path.unlink(missing_ok=True)

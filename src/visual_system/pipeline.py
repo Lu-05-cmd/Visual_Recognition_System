@@ -1,6 +1,7 @@
 import numpy as np
 
 from visual_system.models import FrameResult
+from visual_system.ports import Detector
 from visual_system.services.color_recognizer import DominantColorRecognizer
 from visual_system.services.detector import ColorBlobDetector
 from visual_system.services.inspector import BasicInspector
@@ -18,8 +19,9 @@ class VisionPipeline:
         max_missed_frames: int = 20,
         shape_library: ShapeFeatureLibrary | None = None,
         neural_model_path: str | None = None,
+        detector: Detector | None = None,
     ) -> None:
-        self.detector = ColorBlobDetector(min_area)
+        self.detector = detector if detector is not None else ColorBlobDetector(min_area)
         self.color_recognizer = DominantColorRecognizer()
         neural_model = NeuralShapeModel(neural_model_path) if neural_model_path else None
         self.shape_recognizer = ShapeRecognizer(neural_model)
@@ -29,10 +31,9 @@ class VisionPipeline:
         self._frame_id = 0
 
     def process(self, frame: np.ndarray) -> FrameResult:
-        masks = self.detector.create_detection_masks(frame)
-        detections = self.detector.detect(frame, masks)
+        detections = self.detector.detect(frame)
         self.color_recognizer.recognize(frame, detections)
-        self.shape_recognizer.recognize(frame, detections, masks, self.shape_library)
+        self.shape_recognizer.recognize(frame, detections, feature_library=self.shape_library)
         self.tracker.update(detections)
         self.inspector.inspect(frame, detections)
         self._frame_id += 1
