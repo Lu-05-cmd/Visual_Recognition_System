@@ -81,7 +81,7 @@ def test_pipeline_ignores_conveyor_as_object_and_finds_small_purple_object():
     assert len(result.detections) == 3
     assert [item.color for item in result.detections] == ["red", "purple", "purple"]
     assert [item.solid_shape for item in result.detections] == [
-        "cuboid", "cube", "unknown"
+        "box", "box", "unknown"
     ]
     assert max(
         item.bounding_box.width * item.bounding_box.height
@@ -194,7 +194,7 @@ def test_shape_recognizer_detects_cylinder_with_nearly_round_top_rim() -> None:
     assert _solid_shape(frame) == "cylinder"
 
 
-def test_shape_recognizer_labels_rounded_rectangular_box_as_cuboid() -> None:
+def test_shape_recognizer_labels_rounded_rectangular_box() -> None:
     frame = np.zeros((160, 120, 3), dtype=np.uint8)
     cv2.rectangle(frame, (38, 35), (82, 125), (0, 0, 190), -1)
     cv2.rectangle(frame, (30, 43), (90, 117), (0, 0, 190), -1)
@@ -202,10 +202,10 @@ def test_shape_recognizer_labels_rounded_rectangular_box_as_cuboid() -> None:
         cv2.circle(frame, center, 8, (0, 0, 190), -1)
     cv2.rectangle(frame, (61, 35), (90, 125), (0, 0, 95), -1)
 
-    assert _solid_shape(frame) == "cuboid"
+    assert _solid_shape(frame) == "box"
 
 
-def test_shape_recognizer_labels_chamfered_rectangular_box_as_cuboid() -> None:
+def test_shape_recognizer_labels_chamfered_rectangular_box() -> None:
     frame = np.zeros((170, 120, 3), dtype=np.uint8)
     points = np.array(
         [(38, 25), (82, 25), (92, 35), (92, 135), (82, 145), (38, 145), (28, 135), (28, 35)]
@@ -217,7 +217,7 @@ def test_shape_recognizer_labels_chamfered_rectangular_box_as_cuboid() -> None:
         (0, 0, 95),
     )
 
-    assert _solid_shape(frame) == "cuboid"
+    assert _solid_shape(frame) == "box"
 
 
 def test_shape_recognizer_identifies_shaded_polyhedral_solids() -> None:
@@ -238,8 +238,8 @@ def test_shape_recognizer_identifies_shaded_polyhedral_solids() -> None:
     cv2.fillPoly(cone, [cone_points], (0, 0, 190))
     cv2.fillPoly(cone, [np.array([(60, 20), (95, 90), (60, 90)])], (0, 0, 90))
 
-    assert _solid_shape(cube) == "cube"
-    assert _solid_shape(rectangular_box) == "cuboid"
+    assert _solid_shape(cube) == "box"
+    assert _solid_shape(rectangular_box) == "box"
     assert _solid_shape(cone) == "cone"
 
 

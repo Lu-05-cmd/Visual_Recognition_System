@@ -108,8 +108,7 @@ def test_annotations_stay_inside_frame_for_objects_at_edges() -> None:
 
 def test_shape_names_distinguish_solid_types() -> None:
     expected_names = {
-        "cube": "KHOI LAP PHUONG",
-        "cuboid": "KHOI HOP CHU NHAT",
+        "box": "KHOI HOP",
         "sphere": "KHOI CAU",
         "cylinder": "KHOI TRU",
         "cone": "KHOI NON",

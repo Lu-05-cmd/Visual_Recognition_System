@@ -9,8 +9,7 @@ def test_training_quality_gate_rejects_incomplete_class_coverage():
             "hexagon": 25,
             "sphere": 25,
             "cylinder": 25,
-            "cube": 25,
-            "cuboid": 25,
+            "box": 50,
             "cone": 25,
         },
         {

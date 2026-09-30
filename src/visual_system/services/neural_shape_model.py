@@ -13,21 +13,22 @@ import cv2
 import numpy as np
 
 IMAGE_SIZE = 96
-CHECKPOINT_VERSION = 3
+CHECKPOINT_VERSION = 4
 MIN_DEPLOYMENT_ACCURACY = 0.85
 MIN_TRAIN_SAMPLES_PER_CLASS = 20
 MIN_VALIDATION_SAMPLES_PER_CLASS = 5
 OUTLINE_CLASSES = (
     "circle", "oval", "triangle", "rectangle", "square", "pentagon", "hexagon", "polygon"
 )
-SOLID_CLASSES = ("none", "sphere", "cylinder", "cone", "cube", "cuboid")
+SOLID_CLASSES = ("none", "sphere", "cylinder", "cone", "box")
 SOLID_TO_OUTLINE = {
     "sphere": "circle",
     "cylinder": "oval",
     "cone": "triangle",
-    "cube": "square",
-    "cuboid": "rectangle",
+    "box": "rectangle",
 }
+
+SOLID_LABEL_ALIASES = {"cube": "box", "cuboid": "box"}
 
 
 def prepare_image(image: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:

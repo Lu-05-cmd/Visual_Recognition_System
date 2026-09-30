@@ -24,8 +24,7 @@ SHAPE_LABELS = frozenset(
         "sphere",
         "cylinder",
         "cone",
-        "cube",
-        "cuboid",
+        "box",
     }
 )
 
@@ -101,6 +100,8 @@ class ShapeFeatureLibrary:
         image: np.ndarray,
         label: str,
     ) -> tuple[bool, bool, tuple[float, float, float]]:
+        if label in {"cube", "cuboid"}:
+            label = "box"
         if label not in SHAPE_LABELS:
             raise ValueError("Hình dạng không nằm trong danh sách hỗ trợ")
         extracted = ShapeRecognizer._extract_contour(image)
@@ -177,6 +178,7 @@ class ShapeFeatureLibrary:
 
         distances = []
         for label, x, y, z, descriptor_json, version in rows:
+            label = {"cube": "box", "cuboid": "box"}.get(label, label)
             if labels is not None and label not in labels:
                 continue
             if descriptor_json and version == self.descriptor_version:
@@ -279,12 +281,15 @@ class ShapeFeatureLibrary:
                 ORDER BY label, id
                 """
             ).fetchall()
-        classes = Counter(row[1] for row in rows)
+        classes = Counter()
+        for row in rows:
+            classes[{"cube": "box", "cuboid": "box"}.get(row[1], row[1])] += 1
         groups: dict[str, list[dict]] = {}
         for row in rows:
+            label = {"cube": "box", "cuboid": "box"}.get(row[1], row[1])
             sample = {
                 "id": row[0],
-                "label": row[1],
+                "label": label,
                 "coordinates": [row[2], row[3], row[4]],
                 "created_at": row[5],
                 "image_url": None,
@@ -295,7 +300,7 @@ class ShapeFeatureLibrary:
                     sample["image_url"] = (
                         f"/api/shapes/images/{row[1]}/{image_path.name}"
                     )
-            groups.setdefault(row[1], []).append(sample)
+            groups.setdefault(label, []).append(sample)
         return {
             "axes": list(self.axes),
             "sample_count": len(rows),

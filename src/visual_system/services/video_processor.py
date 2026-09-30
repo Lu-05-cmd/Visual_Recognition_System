@@ -320,8 +320,9 @@ class VideoProcessor:
     @staticmethod
     def _shape_name(detection) -> str:
         solid_names = {
-            "cube": "KHOI LAP PHUONG",
-            "cuboid": "KHOI HOP CHU NHAT",
+            "box": "KHOI HOP",
+            "cube": "KHOI HOP",
+            "cuboid": "KHOI HOP",
             "sphere": "KHOI CAU",
             "cylinder": "KHOI TRU",
             "cone": "KHOI NON",

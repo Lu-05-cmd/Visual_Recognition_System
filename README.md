@@ -6,7 +6,7 @@ Nền tảng hệ thống thị giác máy tính công nghiệp tự động ph�
 
 - `ColorBlobDetector`: detector baseline bằng OpenCV, không cần model weights.
 - `DominantColorRecognizer`: nhận dạng màu chính từ vùng sản phẩm.
-- `ShapeRecognizer`: nhận dạng riêng đường viền 2D và khối 3D. Kho mẫu 2D không được ghi đè loại khối; cone/cube chỉ được gán khi có gradient hoặc đường phân mặt bên trong phù hợp. Đây vẫn là heuristic OpenCV, độ chính xác phụ thuộc góc nhìn và ánh sáng.
+- `ShapeRecognizer`: nhận dạng riêng đường viền 2D và khối 3D. Khối lập phương và khối hộp chữ nhật cùng dùng nhãn `box` (khối hộp). Kho mẫu 2D không được ghi đè loại khối; nhãn khối chỉ được gán khi có bằng chứng hình học phù hợp. Đây vẫn là heuristic OpenCV, độ chính xác phụ thuộc góc nhìn và ánh sáng.
 - `ShapeFeatureLibrary`: lưu các mẫu hình có nhãn trong SQLite và nhận dạng few-shot bằng đặc trưng contour mở rộng (độ tròn, tỷ lệ, độ phức tạp, extent, solidity và Hu moments); ảnh mẫu cũ được nâng cấp đặc trưng khi khởi động.
 - `CentroidTracker`: gán `track_id` ổn định giữa các frame.
 - `BasicInspector`: kiểm tra baseline bằng tỷ lệ cạnh ảnh.
@@ -67,11 +67,11 @@ API upload tương ứng là `POST /api/video/process` với multipart field `fi
 
 Dashboard có mục **Bổ sung mẫu hình dạng** để gửi nhiều ảnh vật thể cùng nhãn. Ảnh gốc được lưu thành PNG trong `data/shape_library/<nhãn>/`, còn thông tin và đặc trưng được lưu trong `data/shape_library.sqlite3`. Có thể xóa riêng từng mẫu. Thêm ảnh vào kho không tự train lại model.
 
-Kho mẫu cũng có thể được dùng qua `GET /api/shapes/library` và `POST /api/shapes/samples` (multipart field `files` nhận nhiều ảnh và field `label` nhận hình dạng đã chọn). Nhãn `circle`, `oval`, `triangle`, `rectangle`, `square`, `pentagon`, `hexagon`, `polygon` là mẫu đường viền 2D; nhãn `sphere`, `cylinder`, `cone`, `cube`, `cuboid` là mẫu khối 3D (`cuboid` là khối hộp chữ nhật). Mỗi ảnh nên có đúng một vật thể, đủ sáng và nhiều góc nhìn/nền khác nhau.
+Kho mẫu cũng có thể được dùng qua `GET /api/shapes/library` và `POST /api/shapes/samples` (multipart field `files` nhận nhiều ảnh và field `label` nhận hình dạng đã chọn). Nhãn `circle`, `oval`, `triangle`, `rectangle`, `square`, `pentagon`, `hexagon`, `polygon` là mẫu đường viền 2D; nhãn `sphere`, `cylinder`, `cone`, `box` là mẫu khối 3D. Nhãn mẫu cũ `cube` và `cuboid` được gộp thành `box`. Mỗi ảnh nên có đúng một vật thể, đủ sáng và nhiều góc nhìn/nền khác nhau.
 
 ### Chuẩn bị dữ liệu
 
-- Mỗi ảnh nên có **một vật thể chính**, gán đúng một nhãn. Nhãn đường viền phẳng: `circle`, `oval`, `triangle`, `rectangle`, `square`, `pentagon`, `hexagon`, `polygon`. Nhãn khối: `sphere`, `cylinder`, `cone`, `cube`, `cuboid`.
+- Mỗi ảnh nên có **một vật thể chính**, gán đúng một nhãn. Nhãn đường viền phẳng: `circle`, `oval`, `triangle`, `rectangle`, `square`, `pentagon`, `hexagon`, `polygon`. Nhãn khối: `sphere`, `cylinder`, `cone`, `box`.
 - Thu thập góc nhìn, khoảng cách, vị trí trong khung, kích thước, màu sắc, ánh sáng và nền khác nhau. Tránh dùng nhiều frame liên tiếp gần như giống nhau làm mẫu độc lập.
 - Ảnh render/xuất từ SolidWorks giúp bổ sung hình học và góc nhìn, nhưng nên trộn với ảnh camera/video thật. Bỏ thanh công cụ, con trỏ, chữ và viền cửa sổ nếu dùng ảnh chụp màn hình. Nền, bóng, màu và độ phản chiếu nên gần điều kiện camera thực tế.
 - Chia dữ liệu theo lần chụp/điều kiện quay: giữ các video thật riêng để kiểm tra cuối, không đưa các frame của cùng một đoạn video vào cả train và validation. Nếu ảnh gần trùng nhau nằm ở hai tập, điểm validation có thể cao giả tạo.
@@ -79,7 +79,7 @@ Kho mẫu cũng có thể được dùng qua `GET /api/shapes/library` và `POST
 
 ### Train và checkpoint
 
-Mạng CNN có hai đầu ra: đầu 2D học đường viền, đầu 3D học `sphere`, `cylinder`, `cone`, `cube`, `cuboid` và nhãn `none` cho ảnh chỉ có nhãn 2D. Ảnh được cắt/đưa về kích thước chuẩn; khi train có tăng cường xoay, tịnh tiến, lật và thay đổi độ sáng/độ tương phản. Tập validation được tách tự động theo ảnh và có cân bằng trọng số lớp. Cài PyTorch một lần trong virtual environment rồi train:
+Mạng CNN có hai đầu ra: đầu 2D học đường viền, đầu 3D học `sphere`, `cylinder`, `cone`, `box` và nhãn `none` cho ảnh chỉ có nhãn 2D. Ảnh `cube`/`cuboid` cũ được gộp vào lớp `box` khi train. Ảnh được cắt/đưa về kích thước chuẩn; khi train có tăng cường xoay, tịnh tiến, lật và thay đổi độ sáng/độ tương phản. Tập validation được tách tự động theo ảnh và có cân bằng trọng số lớp. Cài PyTorch một lần trong virtual environment rồi train:
 
 ```powershell
 .venv\Scripts\python.exe -m pip install -e ".[neural]"
@@ -99,7 +99,7 @@ Mỗi epoch in `train_loss`, `validation_loss`, độ chính xác và precision/
 
 Neural chỉ thay nhãn heuristic khi confidence đạt 0.85 và nhánh tương ứng vượt quality gate trong validation. Khi chưa cài PyTorch hoặc chưa có checkpoint đạt gate, API tiếp tục chạy nhận dạng hiện có. Nếu checkpoint không đạt yêu cầu, báo cáo cuối lệnh train chỉ rõ lớp còn thiếu mẫu hoặc độ chính xác thấp; hãy bổ sung/kiểm tra nhãn và train lại thay vì chỉ tăng epoch.
 
-Checkpoint protocol cũ (trước v3) không được nạp vì bộ nhãn khối đã được tách `cube` và `cuboid`. Sau khi cập nhật mã, cần train lại để tạo checkpoint tương thích; nếu chưa đủ dữ liệu cho một nhánh, nhánh đó sẽ tiếp tục dùng heuristic.
+Checkpoint trước phiên bản gộp nhãn không được nạp vì bộ nhãn khối đã thay đổi. Sau khi cập nhật mã, cần train lại để tạo checkpoint tương thích; nếu chưa đủ dữ liệu cho một nhánh, nhánh đó sẽ tiếp tục dùng heuristic.
 
 ### Đánh giá độ chính xác
 

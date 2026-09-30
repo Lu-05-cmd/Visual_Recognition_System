@@ -21,6 +21,7 @@ from visual_system.services.neural_shape_model import (
     MIN_VALIDATION_SAMPLES_PER_CLASS,
     OUTLINE_CLASSES,
     SOLID_CLASSES,
+    SOLID_LABEL_ALIASES,
     SOLID_TO_OUTLINE,
     _torch_modules,
     prepare_image,
@@ -35,6 +36,7 @@ def load_samples(database: Path, validation_fraction: float, seed: int):
         ).fetchall()
     grouped = defaultdict(list)
     for label, stored_path in rows:
+        label = SOLID_LABEL_ALIASES.get(label, label)
         if label not in (*OUTLINE_CLASSES, *SOLID_TO_OUTLINE):
             continue
         image_path = (root / stored_path).resolve()

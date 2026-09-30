@@ -240,7 +240,7 @@ class ShapeRecognizer:
         if aspect_ratio >= 2.0 and vertex_count >= 5 and color_spread < 2:
             return "cylinder"
         if has_internal_facets and vertex_count in {4, 5, 6}:
-            return "cuboid" if projected_aspect >= 1.4 else "cube"
+            return "box"
         return "unknown"
 
     @staticmethod

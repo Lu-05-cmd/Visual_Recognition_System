@@ -5,7 +5,7 @@ import numpy as np
 
 
 FLAT_SHAPES = ("circle", "oval", "triangle", "square", "rectangle", "pentagon", "hexagon")
-SOLID_SHAPES = ("sphere", "cylinder", "cone", "cube")
+SOLID_SHAPES = ("sphere", "cylinder", "cone", "box")
 
 
 def _polygon(name: str, center: tuple[int, int], radius: int) -> np.ndarray:
@@ -95,7 +95,7 @@ def make_scene(
             edge_distance = np.abs(columns - center_column) / half_width
             light = np.clip(1.18 - 0.55 * edge_distance, 0.5, 1.2)
             object_layer[row, columns] = np.clip(base[None, :] * light[:, None], 0, 255)
-    elif name == "cube":
+    elif name == "box":
         top = np.asarray([(cx, cy-radius), (cx+radius, cy-radius//2), (cx, cy), (cx-radius, cy-radius//2)], np.int32)
         left = np.asarray([(cx-radius, cy-radius//2), (cx, cy), (cx, cy+radius), (cx-radius, cy+radius//2)], np.int32)
         right = np.asarray([(cx, cy), (cx+radius, cy-radius//2), (cx+radius, cy+radius//2), (cx, cy+radius)], np.int32)
