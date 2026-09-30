@@ -55,3 +55,19 @@ def test_confirmed_shape_does_not_change_on_one_frame_glitch():
     assert [item.shape for item in frames] == [
         "unknown", "unknown", "square", "square", "square"
     ]
+
+
+def test_unknown_evidence_breaks_pending_shape_change_sequence():
+    tracker = CentroidTracker(max_distance=40)
+    observations = ("square", "square", "square", "circle", "circle", "unknown", "circle")
+    frames = [
+        Detection("product", 0.95, BoundingBox(20, 20, 40, 40), shape=shape)
+        for shape in observations
+    ]
+
+    for detection in frames:
+        tracker.update([detection])
+
+    assert [item.shape for item in frames] == [
+        "unknown", "unknown", "square", "square", "square", "square", "square"
+    ]

@@ -214,6 +214,7 @@ class CentroidTracker:
         committed = self._shape_locked[track_id][index]
         pending = self._shape_pending[track_id][kind]
         if observed == "unknown":
+            pending.clear()
             return committed
         if observed == committed:
             pending.clear()

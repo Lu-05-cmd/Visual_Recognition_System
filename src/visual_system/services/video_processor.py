@@ -171,9 +171,10 @@ class VideoProcessor:
                 )
             )
             unique_colors[color] += 1
-            unique_outline_shapes[outline_shape] += 1
             if solid_shape != "unknown":
                 unique_solid_shapes[solid_shape] += 1
+            else:
+                unique_outline_shapes[outline_shape] += 1
             unique_shapes[solid_shape if solid_shape != "unknown" else outline_shape] += 1
             statuses = inspection_votes[track_id]
             if statuses["pass"] > statuses["fail"]:

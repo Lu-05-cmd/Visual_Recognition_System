@@ -3,7 +3,7 @@ from collections import Counter
 import cv2
 import numpy as np
 
-from visual_system.models import BoundingBox, Detection, InspectionStatus
+from visual_system.models import BoundingBox, Detection, FrameResult, InspectionStatus
 from visual_system.services import video_processor as video_processor_module
 from visual_system.services.video_processor import VideoProcessor
 
@@ -31,6 +31,62 @@ def test_video_processor_writes_annotated_video(tmp_path) -> None:
     assert summary.frame_detections == 2
     assert summary.unique_tracks == 1
     assert summary.colors == {"red": 1}
+
+
+def test_video_summary_does_not_count_solid_projections_as_flat_shapes(
+    tmp_path, monkeypatch
+) -> None:
+    input_path = tmp_path / "solid-shapes.mp4"
+    output_path = tmp_path / "solid-shapes-annotated.mp4"
+    writer = cv2.VideoWriter(
+        str(input_path),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        10.0,
+        (160, 120),
+    )
+    for index in range(6):
+        frame = np.zeros((120, 160, 3), dtype=np.uint8)
+        cv2.circle(frame, (20 + index * 15, 20), 3, (255, 255, 255), -1)
+        writer.write(frame)
+    writer.release()
+
+    class FixedShapePipeline:
+        def __init__(self, *args, **kwargs) -> None:
+            self.frame_id = 0
+
+        def process(self, frame: np.ndarray):
+            self.frame_id += 1
+            detections = [
+                Detection(
+                    "product",
+                    0.95,
+                    BoundingBox(10, 10, 40, 40),
+                    color="red",
+                    shape="circle",
+                    solid_shape="sphere",
+                    track_id=1,
+                    inspection=InspectionStatus.PASS,
+                ),
+                Detection(
+                    "product",
+                    0.95,
+                    BoundingBox(80, 10, 40, 40),
+                    color="blue",
+                    shape="square",
+                    solid_shape="box",
+                    track_id=2,
+                    inspection=InspectionStatus.PASS,
+                ),
+            ]
+            return FrameResult(self.frame_id, frame.shape[1], frame.shape[0], detections)
+
+    monkeypatch.setattr(video_processor_module, "VisionPipeline", FixedShapePipeline)
+
+    summary = VideoProcessor(100, 80.0, 10).process(input_path, output_path)
+
+    assert summary.unique_solid_shapes == {"sphere": 1, "box": 1}
+    assert summary.unique_outline_shapes == {}
+    assert summary.unique_shapes == {"sphere": 1, "box": 1}
 
 
 def test_video_processor_passes_neural_checkpoint_to_frame_pipeline(
