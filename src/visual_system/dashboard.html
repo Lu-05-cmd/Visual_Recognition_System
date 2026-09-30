@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Giám sát sản phẩm</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #e4eeeb;
+      --muted: #9aaba8;
+      --paper: #10191b;
+      --line: #314143;
+      --panel: #1a2729;
+      --teal: #72cbb3;
+      --amber: #efa85c;
+      --night: #091113;
+      --pass: #7cdaa9;
+      --fail: #ff8c80;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 26px clamp(16px, 3vw, 40px);
+      color: var(--ink);
+      font-family: Bahnschrift, "Trebuchet MS", sans-serif;
+      background-color: var(--paper);
+      background-image:
+        linear-gradient(rgba(114, 203, 179, .04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(114, 203, 179, .04) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+
+    .shell { width: 100%; margin: 0 auto; }
+
+    .masthead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 0 2px 22px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow {
+      margin: 0 0 7px;
+      color: var(--teal);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+
+    h1 { margin: 0; font-size: 30px; line-height: 1.15; }
+    .sub { margin: 8px 0 0; color: var(--muted); font-size: 15px; }
+
+    .system-state {
+      flex: none;
+      padding: 9px 12px;
+      border: 1px solid #3f6758;
+      border-radius: 4px;
+      color: var(--pass);
+      background: #1b332b;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .workspace {
+      width: 100%;
+      margin: 18px 0 0;
+    }
+
+    .tab-list {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .tab-button {
+      min-width: 180px;
+      border-radius: 4px 4px 0 0;
+      color: var(--muted);
+      background: #1a2729;
+      border-color: #314143;
+      transition: color .2s ease, background-color .2s ease, border-color .2s ease,
+        transform .2s ease, box-shadow .2s ease;
+    }
+
+    .tab-button:hover { transform: translateY(-1px); }
+
+    .tab-button[aria-selected="true"] {
+      color: #10221e;
+      background: var(--teal);
+      border-color: var(--teal);
+      box-shadow: 0 4px 14px rgba(114, 203, 179, .2);
+    }
+
+    .workspace .tab-panel {
+      display: block;
+      width: 100%;
+      margin-top: 0;
+    }
+
+    .workspace .tab-panel[hidden] { display: none; }
+
+    .workspace .tab-panel.tab-entering {
+      animation: panel-enter .24s ease-out both;
+    }
+
+    @keyframes panel-enter {
+      from { opacity: 0; transform: translateY(7px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .tab-button { transition: none; }
+      .workspace .tab-panel.tab-entering { animation: none; }
+    }
+
+    .panel {
+      min-width: 0;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-top: 3px solid var(--teal);
+      border-radius: 6px;
+      background: var(--panel);
+      box-shadow: 0 8px 28px rgba(0, 0, 0, .18);
+    }
+
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    h2 { margin: 0; font-size: 19px; }
+    .section-note { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+
+    .status {
+      max-width: 48%;
+      color: var(--teal);
+      font-size: 13px;
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+
+    .field { display: grid; gap: 7px; margin: 0 0 15px; }
+    .field label, .media-title { font-size: 13px; font-weight: 700; }
+
+    input[type=file], select {
+      width: 100%;
+      min-width: 0;
+      min-height: 42px;
+      padding: 9px 11px;
+      border: 1px solid #425456;
+      border-radius: 4px;
+      color: var(--ink);
+      background: #111c1e;
+      font: inherit;
+    }
+
+    input[type=file]::file-selector-button {
+      margin-right: 10px;
+      padding: 6px 9px;
+      border: 0;
+      border-radius: 3px;
+      color: #10221e;
+      background: var(--teal);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .actions { display: flex; flex-wrap: wrap; gap: 9px; }
+
+    button {
+      min-height: 40px;
+      padding: 9px 14px;
+      border: 1px solid var(--teal);
+      border-radius: 4px;
+      color: #fff;
+      background: var(--teal);
+      font: inherit;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    button:hover { background: #8cddc7; }
+
+    button:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 3px solid rgba(223, 135, 63, .45);
+      outline-offset: 2px;
+    }
+
+    .button-secondary { color: var(--ink); background: #243335; border-color: #4b5b5d; }
+    .button-secondary:hover { background: #304244; }
+    .shape-library-status {
+      display: block;
+      max-width: 100%;
+      margin-bottom: 14px;
+      text-align: left;
+    }
+    .progress { display: none; width: 100%; height: 8px; margin-top: 16px; accent-color: var(--amber); }
+    .elapsed-time { margin: 10px 0 0; color: var(--muted); font-size: 14px; }
+
+    .result-video {
+      display: none;
+      width: 100%;
+      max-height: 56vh;
+      margin-top: 16px;
+      aspect-ratio: 16 / 9;
+      object-fit: contain;
+      background: var(--night);
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0 18px;
+      margin-top: 14px;
+    }
+
+    .metric {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      min-width: 0;
+      padding: 11px 0;
+      border-bottom: 1px solid #314143;
+      font-size: 13px;
+    }
+
+    .metric span { color: var(--muted); overflow-wrap: anywhere; }
+    .metric strong { flex: none; font-size: 18px; }
+    .metric-wide { grid-column: 1 / -1; align-items: flex-start; }
+    .shape-groups {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px;
+      margin-top: 16px;
+    }
+    .shape-group {
+      min-width: 0;
+      height: 360px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #142022;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .shape-group-header {
+      display: flex;
+      flex: 0 0 30px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .shape-group h3 { min-width: 0; margin: 0; font-size: 15px; }
+    .shape-sample-grid {
+      display: grid;
+      flex: 0 0 auto;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-auto-rows: 140px;
+      gap: 8px;
+      max-height: 288px;
+      overflow-y: auto;
+      padding-right: 3px;
+    }
+    .shape-sample {
+      min-width: 0;
+      padding: 6px;
+      border: 1px solid #314143;
+      border-radius: 4px;
+      background: #0d1719;
+    }
+    .shape-sample img, .shape-sample-placeholder {
+      display: grid;
+      width: 100%;
+      height: 82px;
+      place-items: center;
+      object-fit: contain;
+      color: var(--muted);
+      background: #10191b;
+      font-size: 11px;
+      text-align: center;
+    }
+    .shape-sample small {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 10px;
+      overflow-wrap: anywhere;
+    }
+    .shape-sample-delete {
+      width: 100%;
+      min-height: 22px;
+      margin-top: 2px;
+      padding: 2px 4px;
+      border-color: #8a514d;
+      background: #593632;
+      font-size: 10px;
+    }
+    .shape-sample-delete:hover { background: #75443e; }
+    .pass { color: var(--pass); }
+    .fail { color: var(--fail); }
+    @media (max-width: 760px) {
+      body { padding: 18px 14px; }
+      .masthead { align-items: flex-start; flex-direction: column; gap: 14px; }
+      .workspace { margin-top: 12px; }
+      .tab-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .tab-button { min-width: 0; padding-inline: 8px; }
+      .panel { padding: 16px; }
+      .summary { gap: 0 12px; }
+    }
+
+    @media (max-width: 420px) {
+      .summary { grid-template-columns: minmax(0, 1fr); }
+      .metric-wide { grid-column: auto; }
+      .toolbar { flex-direction: column; }
+      .status { max-width: 100%; text-align: left; }
+      .actions button { flex: 1 1 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">HỆ THỐNG THỊ GIÁC MÁY</p>
+        <h1>Giám sát sản phẩm</h1>
+        <p class="sub">Nhận dạng hình dạng, màu sắc và kiểm tra chất lượng</p>
+      </div>
+      <span class="system-state">SẴN SÀNG</span>
+    </header>
+    <main class="workspace">
+      <div class="tab-list" role="tablist" aria-label="Chức năng">
+        <button id="video-tab" class="tab-button" type="button" role="tab"
+          aria-selected="true" aria-controls="video-panel" onclick="selectTab('video')">Phân tích video</button>
+        <button id="shapes-tab" class="tab-button" type="button" role="tab"
+          aria-selected="false" aria-controls="shapes-panel" onclick="selectTab('shapes')">Bổ sung hình dạng</button>
+      </div>
+      <section id="video-panel" class="tab-panel panel" role="tabpanel" aria-labelledby="video-tab">
+        <div class="toolbar">
+          <div>
+            <h2 id="video-heading">Phân tích video</h2>
+            <p class="section-note">Tải video lên để nhận dạng và thống kê</p>
+          </div>
+          <span id="video-status" class="status" aria-live="polite">Chưa chọn video</span>
+        </div>
+        <div class="field">
+          <label for="video-file">Tệp video</label>
+          <input id="video-file" type="file" accept="video/*">
+        </div>
+        <div class="field">
+          <label for="target-color">Lọc theo màu</label>
+          <select id="target-color">
+            <option value="all">Tất cả màu</option>
+            <option value="red">Đỏ</option>
+            <option value="green">Xanh lá</option>
+            <option value="blue">Xanh dương</option>
+            <option value="orange">Cam</option>
+            <option value="yellow">Vàng</option>
+            <option value="purple">Tím</option>
+            <option value="black">Đen</option>
+            <option value="white">Trắng</option>
+            <option value="gray">Xám</option>
+          </select>
+        </div>
+        <div class="actions">
+          <button onclick="processVideo()">Phân tích video</button>
+          <button id="cancel-video" class="button-secondary" type="button"
+            onclick="cancelVideo()" disabled>Bỏ qua tiến trình</button>
+          <button class="button-secondary" onclick="resetSystem()">Đặt lại</button>
+        </div>
+        <progress id="video-progress" class="progress" max="100" value="0"
+          aria-label="Tiến trình phân tích"></progress>
+        <video id="result-video" class="result-video" controls playsinline></video>
+        <div id="video-summary" class="summary"></div>
+      </section>
+      <section id="shapes-panel" class="tab-panel panel" role="tabpanel"
+        aria-labelledby="shapes-tab" hidden>
+        <div class="toolbar">
+          <div>
+            <h2 id="shape-library-heading">Bổ sung mẫu hình dạng</h2>
+            <p class="section-note">Tọa độ 3D: độ tròn, độ cân đối và độ phức tạp đường viền.</p>
+          </div>
+        </div>
+          <span id="shape-library-status" class="status shape-library-status" aria-live="polite">Đang tải kho mẫu...</span>
+          <form id="shape-sample-form" onsubmit="addShapeSample(event)">
+            <div class="field">
+              <label for="shape-sample-label">Tên hình dạng</label>
+              <select id="shape-sample-label" name="label" required>
+                <option value="" selected disabled>Chọn hình dạng</option>
+                <option value="circle">Hình tròn</option>
+                <option value="oval">Hình oval</option>
+                <option value="triangle">Tam giác</option>
+                <option value="rectangle">Hình chữ nhật</option>
+                <option value="square">Hình vuông</option>
+                <option value="pentagon">Ngũ giác</option>
+                <option value="hexagon">Lục giác</option>
+                <option value="polygon">Đa giác</option>
+                <option value="sphere">Khối cầu</option>
+                <option value="cylinder">Hình trụ</option>
+                <option value="cone">Khối nón</option>
+                <option value="cube">Khối lập phương</option>
+                <option value="cuboid">Khối hộp chữ nhật</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="shape-sample-file">Ảnh có vật thể cần gán nhãn</label>
+              <input id="shape-sample-file" name="files" type="file" accept="image/*" multiple required>
+            </div>
+            <div class="actions">
+              <button type="submit">Thêm mẫu vào kho</button>
+            </div>
+          </form>
+          <div id="shape-library-groups" class="shape-groups" aria-live="polite"></div>
+      </section>
+    </main>
+  </div>
+  <script>
+    const colorNames = {
+      all: 'mọi màu', red: 'đỏ', green: 'xanh lá', blue: 'xanh dương', orange: 'cam',
+      yellow: 'vàng', purple: 'tím', black: 'đen', white: 'trắng', gray: 'xám'
+    };
+    const shapeNames = {
+      circle: 'hình tròn', oval: 'hình oval', triangle: 'tam giác', rectangle: 'hình chữ nhật',
+      square: 'hình vuông', pentagon: 'ngũ giác', hexagon: 'lục giác', polygon: 'đa giác',
+      sphere: 'khối cầu', cylinder: 'hình trụ', cone: 'khối nón', cube: 'khối lập phương',
+      cuboid: 'khối hộp chữ nhật',
+      unknown: 'chưa rõ',
+    };
+
+    function selectTab(tab) {
+      const videoSelected = tab === 'video';
+      const activePanel = document.getElementById(videoSelected ? 'video-panel' : 'shapes-panel');
+      document.getElementById('video-tab').setAttribute('aria-selected', String(videoSelected));
+      document.getElementById('shapes-tab').setAttribute('aria-selected', String(!videoSelected));
+      document.getElementById('video-panel').hidden = !videoSelected;
+      document.getElementById('shapes-panel').hidden = videoSelected;
+      activePanel.classList.remove('tab-entering');
+      void activePanel.offsetWidth;
+      activePanel.classList.add('tab-entering');
+      if (!videoSelected && !window.shapeLibraryLoaded) {
+        window.shapeLibraryLoaded = true;
+        loadShapeLibrary();
+      }
+    }
+
+    async function processVideo() {
+      const input = document.getElementById('video-file');
+      const file = input.files[0];
+      const status = document.getElementById('video-status');
+      const progress = document.getElementById('video-progress');
+      if (!file) {
+        status.textContent = 'Vui lòng chọn tệp video';
+        return;
+      }
+      const color = document.getElementById('target-color').value;
+      const form = new FormData();
+      form.append('file', file);
+      const cancelButton = document.getElementById('cancel-video');
+      if (window.videoRequestController) window.videoRequestController.abort();
+      const controller = new AbortController();
+      window.videoRequestController = controller;
+      cancelButton.disabled = false;
+      progress.style.display = 'block';
+      progress.value = 10;
+      status.textContent = 'Đang phân tích video...';
+      const progressTimer = setInterval(() => {
+        if (progress.value < 90) progress.value += 4;
+      }, 500);
+
+      let response;
+      try {
+        response = await fetch('/api/video/process?color=' + encodeURIComponent(color), {
+          method: 'POST',
+          body: form,
+          signal: controller.signal
+        });
+      } catch (error) {
+        if (error.name === 'AbortError') {
+          status.textContent = 'Đã bỏ qua tiến trình phân tích';
+          progress.value = 0;
+          progress.style.display = 'none';
+          cancelButton.disabled = true;
+          return;
+        }
+        status.textContent = 'Không thể kết nối để xử lý video';
+        progress.style.display = 'none';
+        clearInterval(progressTimer);
+        cancelButton.disabled = true;
+        return;
+      }
+      clearInterval(progressTimer);
+      cancelButton.disabled = true;
+      if (!response.ok) {
+        progress.value = 0;
+        progress.style.display = 'none';
+        status.textContent = 'Xử lý video không thành công';
+        cancelButton.disabled = true;
+        return;
+      }
+
+      const data = await response.json();
+      const video = document.getElementById('result-video');
+      const summary = data.summary;
+      progress.value = 100;
+      video.src = data.video_url;
+      video.style.display = 'block';
+      status.textContent = color === 'all'
+        ? 'Đã phân tích xong'
+        : 'Đã lọc màu ' + colorNames[color];
+      const colorSummary = Object.entries(summary.unique_colors)
+        .map(([name, count]) => (colorNames[name] || name) + ': ' + count)
+        .join(', ') || 'Chưa có dữ liệu';
+      const outlineSummary = Object.entries(summary.unique_outline_shapes || {})
+        .map(([name, count]) => (shapeNames[name] || name) + ': ' + count)
+        .join(', ') || 'Chưa có dữ liệu';
+      const solidSummary = Object.entries(summary.unique_solid_shapes || {})
+        .map(([name, count]) => (shapeNames[name] || name) + ': ' + count)
+        .join(', ') || 'Chưa xác nhận khối 3D';
+      document.getElementById('video-summary').innerHTML = `
+        <div class="metric"><span>Số khung hình</span>
+          <strong>${summary.processed_frames}</strong></div>
+        <div class="metric"><span>Khung hình trùng đã bỏ qua</span>
+          <strong>${summary.duplicate_frames_skipped}</strong></div>
+        <div class="metric"><span>Vật thể duy nhất</span>
+          <strong>${summary.total_detections}</strong></div>
+        <div class="metric"><span>Lượt phát hiện ở frame đã phân tích (đã bỏ frame trùng)</span>
+          <strong>${summary.frame_detections}</strong></div>
+        <div class="metric"><span>Đạt / Không đạt</span>
+          <strong><span class="pass">${summary.passed}</span> /
+          <span class="fail">${summary.failed}</span></strong></div>
+        <div class="metric metric-wide"><span>Màu sắc</span>
+          <span>${colorSummary}</span></div>
+        <div class="metric metric-wide"><span>Đường viền 2D</span>
+          <span>${outlineSummary}</span></div>
+        <div class="metric metric-wide"><span>Khối 3D đã xác nhận</span>
+          <span>${solidSummary}</span></div>`;
+    }
+
+    function cancelVideo() {
+      if (window.videoRequestController) window.videoRequestController.abort();
+    }
+
+    async function resetSystem() {
+      if (window.videoRequestController) window.videoRequestController.abort();
+      document.getElementById('cancel-video').disabled = true;
+      await fetch('/api/reset', { method: 'POST' });
+      document.getElementById('video-file').value = '';
+      const video = document.getElementById('result-video');
+      video.removeAttribute('src');
+      video.load();
+      video.style.display = 'none';
+      document.getElementById('video-summary').innerHTML = '';
+      document.getElementById('video-progress').value = 0;
+      document.getElementById('video-progress').style.display = 'none';
+      document.getElementById('target-color').value = 'all';
+      document.getElementById('video-status').textContent = 'Chưa chọn video';
+    }
+
+    async function loadShapeLibrary() {
+      const status = document.getElementById('shape-library-status');
+      const groups = document.getElementById('shape-library-groups');
+      try {
+        const response = await fetch('/api/shapes/library');
+        if (!response.ok) throw new Error('library unavailable');
+        const library = await response.json();
+        window.shapeLibraryLoaded = true;
+        status.textContent = `${library.sample_count} mẫu trong ${Object.keys(library.classes).length} nhóm`;
+        groups.replaceChildren();
+        for (const [label, samples] of Object.entries(library.groups)) {
+          const group = document.createElement('section');
+          group.className = 'shape-group';
+          const header = document.createElement('div');
+          header.className = 'shape-group-header';
+          const heading = document.createElement('h3');
+          heading.textContent = `${shapeNames[label] || label} · ${samples.length} ảnh`;
+          header.append(heading);
+          const gallery = document.createElement('div');
+          gallery.className = 'shape-sample-grid';
+          for (const sample of samples) {
+            const card = document.createElement('div');
+            card.className = 'shape-sample';
+            if (sample.image_url) {
+              const image = document.createElement('img');
+              image.src = sample.image_url;
+              image.alt = shapeNames[label] || label;
+              card.append(image);
+            } else {
+              const placeholder = document.createElement('div');
+              placeholder.className = 'shape-sample-placeholder';
+              placeholder.textContent = 'Ảnh mẫu cũ chưa lưu';
+              card.append(placeholder);
+            }
+            const coordinates = document.createElement('small');
+            coordinates.textContent = sample.coordinates
+              .map(value => Number(value).toFixed(2)).join(', ');
+            card.append(coordinates);
+            const deleteButton = document.createElement('button');
+            deleteButton.type = 'button';
+            deleteButton.className = 'shape-sample-delete';
+            deleteButton.textContent = 'Xóa ảnh này';
+            deleteButton.addEventListener('click', () => deleteShapeSample(sample));
+            card.append(deleteButton);
+            gallery.append(card);
+          }
+          group.append(header, gallery);
+          groups.append(group);
+        }
+        if (library.sample_count === 0) status.textContent = 'Kho mẫu đang trống';
+      } catch (error) {
+        window.shapeLibraryLoaded = false;
+        status.textContent = 'Không đọc được kho mẫu';
+      }
+    }
+
+    async function deleteShapeSample(sample) {
+      const shapeName = shapeNames[sample.label] || sample.label;
+      if (!confirm(`Xóa ảnh mẫu này khỏi nhóm “${shapeName}”?`)) return;
+      const status = document.getElementById('shape-library-status');
+      try {
+        const response = await fetch('/api/shapes/samples/' + sample.id, {
+          method: 'DELETE'
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || 'Không thể xóa ảnh mẫu');
+        await loadShapeLibrary();
+        status.textContent = `Đã xóa một ảnh mẫu khỏi nhóm “${shapeName}”`;
+      } catch (error) {
+        status.textContent = error.message || 'Không thể xóa ảnh mẫu';
+      }
+    }
+
+    async function addShapeSample(event) {
+      event.preventDefault();
+      const labelSelect = document.getElementById('shape-sample-label');
+      const imageInput = document.getElementById('shape-sample-file');
+      const status = document.getElementById('shape-library-status');
+      const payload = new FormData();
+      payload.append('label', labelSelect.value);
+      for (const file of imageInput.files) payload.append('files', file);
+      status.textContent = `Đang xử lý ${imageInput.files.length} ảnh...`;
+      try {
+        const response = await fetch('/api/shapes/samples', { method: 'POST', body: payload });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || 'Không thể thêm mẫu');
+        const shapeName = shapeNames[result.label] || result.label;
+        const outcome = `Đã thêm ${result.added_count}/${result.total} ảnh vào nhóm “${shapeName}”`;
+        const duplicateNote = result.duplicate_count
+          ? `; ${result.duplicate_count} ảnh trùng đã có`
+          : '';
+        const restoredNote = result.restored_count
+          ? ` (${result.restored_count} ảnh cũ đã được lưu vào thư mục)`
+          : '';
+        const failureNote = result.failures.length
+          ? `; ${result.failures.length} ảnh lỗi: ${result.failures.map(item => item.filename).join(', ')}`
+          : '';
+        imageInput.value = '';
+        await loadShapeLibrary();
+        status.textContent = outcome + duplicateNote + restoredNote + failureNote;
+      } catch (error) {
+        status.textContent = error.message || 'Không thể thêm mẫu';
+      }
+    }
+
+  </script>
+</body>
+</html>
