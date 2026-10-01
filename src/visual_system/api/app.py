@@ -38,17 +38,17 @@ def create_app(
         settings.detection_min_area,
         settings.track_max_distance,
         settings.track_max_missed_frames,
-        shape_library,
         settings.neural_shape_model_path,
         detector_factory() if detector_factory is not None else None,
+        settings.shape_library_path,
     )
     app.state.camera_pipeline = VisionPipeline(
         settings.detection_min_area,
         settings.track_max_distance,
         settings.track_max_missed_frames,
-        shape_library,
         settings.neural_shape_model_path,
         detector_factory() if detector_factory is not None else None,
+        settings.shape_library_path,
     )
     app.state.video_results = video_results
     app.state.detector_factory = detector_factory

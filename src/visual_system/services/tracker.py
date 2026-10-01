@@ -3,6 +3,8 @@ from math import hypot
 
 from visual_system.models import BoundingBox, Detection
 
+SHAPE_CONFIRMATION_FRAMES = 5
+
 
 class CentroidTracker:
     def __init__(self, max_distance: float = 120.0, max_missed_frames: int = 20) -> None:
@@ -15,40 +17,45 @@ class CentroidTracker:
         self._colors: dict[int, str] = {}
         self._color_votes: dict[int, Counter[str]] = {}
         self._snapshots: dict[int, tuple[BoundingBox, float, str]] = {}
-        self._shapes: dict[int, tuple[str, str]] = {}
-        self._shape_votes: dict[int, Counter[str]] = {}
-        self._solid_shape_votes: dict[int, Counter[str]] = {}
-        self._shape_pending: dict[int, dict[str, Counter[str]]] = {}
-        self._shape_locked: dict[int, tuple[str, str]] = {}
+        self._solid_shape_pending: dict[int, Counter[str]] = {}
+        self._solid_shape_locked: dict[int, str] = {}
         self._box_centers: dict[int, tuple[float, float]] = {}
 
     def update(self, detections: list[Detection]) -> list[Detection]:
         unmatched = set(self._centers)
         for detection in detections:
+            detection.shape = "unknown"
             center = detection.bounding_box.center
-            compatible = [
-                track_id
-                for track_id in unmatched
-                if detection.color == self._colors[track_id]
-                or detection.color == "unknown"
-                or self._colors[track_id] == "unknown"
-            ]
-            candidate_pool = compatible or list(unmatched)
-            candidate = min(
-                candidate_pool,
-                key=lambda track_id: hypot(
-                    center[0] - self._predicted_center(track_id)[0],
-                    center[1] - self._predicted_center(track_id)[1],
-                ),
-                default=None,
-            )
-            candidate_distance = (
-                hypot(
-                    center[0] - self._predicted_center(candidate)[0],
-                    center[1] - self._predicted_center(candidate)[1],
+            candidates = []
+            for track_id in unmatched:
+                predicted_center = self._predicted_center(track_id)
+                distance = hypot(
+                    center[0] - predicted_center[0],
+                    center[1] - predicted_center[1],
                 )
-                if candidate is not None
-                else float("inf")
+                allowed_distance = self.max_distance * (
+                    1
+                    + min(
+                        self._missed[track_id] / max(self.max_missed_frames, 1),
+                        0.5,
+                    )
+                )
+                color_matches = (
+                    detection.color == self._colors[track_id]
+                    or detection.color == "unknown"
+                    or self._colors[track_id] == "unknown"
+                )
+                if color_matches and distance <= allowed_distance:
+                    candidates.append((track_id, distance, True))
+                elif (
+                    not color_matches
+                    and distance <= min(allowed_distance, self.max_distance * 0.5)
+                ):
+                    candidates.append((track_id, distance, False))
+            candidate, candidate_distance, color_matches = min(
+                candidates,
+                key=lambda item: (not item[2], item[1]),
+                default=(None, float("inf"), False),
             )
             allowed_distance = (
                 self.max_distance
@@ -62,24 +69,8 @@ class CentroidTracker:
                 if candidate is not None
                 else 0
             )
-            color_matches = (
-                candidate is not None
-                and (
-                    detection.color == self._colors[candidate]
-                    or detection.color == "unknown"
-                    or self._colors[candidate] == "unknown"
-                )
-            )
-            # A short color-recognition glitch must not create a new serial.
-            # Only allow this fallback when the center is still close.
-            color_fallback = (
-                candidate is not None
-                and not color_matches
-                and candidate_distance <= self.max_distance * 0.5
-            )
             if (
                 candidate is not None
-                and (color_matches or color_fallback)
                 and candidate_distance <= allowed_distance
             ):
                 detection.track_id = candidate
@@ -102,16 +93,12 @@ class CentroidTracker:
                 if locked_votes >= 2:
                     self._colors[candidate] = locked_color
                 detection.color = self._colors[candidate]
-                detection.shape = self._confirm_shape(
-                    candidate, "outline", detection.shape, self._shape_votes[candidate]
-                )
                 detection.solid_shape = self._confirm_shape(
-                    candidate,
-                    "solid",
                     detection.solid_shape,
-                    self._solid_shape_votes[candidate],
+                    self._solid_shape_pending[candidate],
+                    self._solid_shape_locked[candidate],
                 )
-                self._shapes[candidate] = (detection.shape, detection.solid_shape)
+                self._solid_shape_locked[candidate] = detection.solid_shape
                 previous_center = self._centers[candidate]
                 self._centers[candidate] = center
                 previous_velocity = self._velocities[candidate]
@@ -140,24 +127,12 @@ class CentroidTracker:
                     detection.confidence,
                     detection.label,
                 )
-                self._shapes[self._next_id] = ("unknown", "unknown")
-                self._shape_votes[self._next_id] = Counter(
-                    {detection.shape: 0} if detection.shape != "unknown" else {}
-                )
-                self._solid_shape_votes[self._next_id] = Counter(
-                    {detection.solid_shape: 0}
+                self._solid_shape_pending[self._next_id] = (
+                    Counter({detection.solid_shape: 1})
                     if detection.solid_shape != "unknown"
-                    else {}
+                    else Counter()
                 )
-                self._shape_pending[self._next_id] = {
-                    "outline": Counter({detection.shape: 1})
-                    if detection.shape != "unknown"
-                    else Counter(),
-                    "solid": Counter({detection.solid_shape: 1})
-                    if detection.solid_shape != "unknown"
-                    else Counter(),
-                }
-                self._shape_locked[self._next_id] = ("unknown", "unknown")
+                self._solid_shape_locked[self._next_id] = "unknown"
                 if detection.shape != "unknown":
                     detection.shape = "unknown"
                 if detection.solid_shape != "unknown":
@@ -173,11 +148,8 @@ class CentroidTracker:
                 del self._colors[track_id]
                 del self._color_votes[track_id]
                 del self._snapshots[track_id]
-                del self._shapes[track_id]
-                del self._shape_votes[track_id]
-                del self._solid_shape_votes[track_id]
-                del self._shape_pending[track_id]
-                del self._shape_locked[track_id]
+                del self._solid_shape_pending[track_id]
+                del self._solid_shape_locked[track_id]
         return detections
 
     def _predicted_center(self, track_id: int) -> tuple[float, float]:
@@ -203,16 +175,15 @@ class CentroidTracker:
 
     def _confirm_shape(
         self,
-        track_id: int,
-        kind: str,
         observed: str,
-        votes: Counter[str],
-        required_observations: int = 3,
+        pending: Counter[str],
+        committed: str,
+        required_observations: int = SHAPE_CONFIRMATION_FRAMES,
     ) -> str:
-        """Require consecutive evidence to confirm or change a track's shape."""
-        index = 0 if kind == "outline" else 1
-        committed = self._shape_locked[track_id][index]
-        pending = self._shape_pending[track_id][kind]
+        """Lock a solid label only after five consecutive matching observations."""
+        if committed != "unknown":
+            pending.clear()
+            return committed
         if observed == "unknown":
             pending.clear()
             return committed
@@ -228,11 +199,7 @@ class CentroidTracker:
         if consecutive < required_observations:
             return committed
 
-        votes[observed] += consecutive
         pending.clear()
-        locked = list(self._shape_locked[track_id])
-        locked[index] = observed
-        self._shape_locked[track_id] = (locked[0], locked[1])
         return observed
 
     @staticmethod

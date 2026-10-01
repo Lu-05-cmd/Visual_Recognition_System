@@ -84,6 +84,60 @@ def test_feature_routers_preserve_existing_api_paths(tmp_path: Path) -> None:
     assert client.get("/api/video/result/missing.mp4").status_code == 404
 
 
+def test_shape_sample_upload_rejects_2d_labels(tmp_path: Path) -> None:
+    settings = Settings(
+        _env_file=None,
+        shape_library_path=tmp_path / "library.sqlite3",
+        neural_shape_model_path=tmp_path / "missing-model.pt",
+    )
+    client = TestClient(create_app(settings, video_results=tmp_path / "results"))
+
+    response = client.post(
+        "/api/shapes/samples",
+        data={"label": "circle"},
+        files={"files": ("flat.png", b"not-decoded", "image/png")},
+    )
+
+    assert response.status_code == 400
+    assert "khối 3D" in response.json()["detail"]
+
+
+def test_shape_sample_upload_rejects_legacy_cube_alias(tmp_path: Path) -> None:
+    settings = Settings(
+        _env_file=None,
+        shape_library_path=tmp_path / "library.sqlite3",
+        neural_shape_model_path=tmp_path / "missing-model.pt",
+    )
+    client = TestClient(create_app(settings, video_results=tmp_path / "results"))
+
+    response = client.post(
+        "/api/shapes/samples",
+        data={"label": "cube"},
+        files={"files": ("legacy.png", b"not-decoded", "image/png")},
+    )
+
+    assert response.status_code == 400
+
+
+def test_legacy_cube_sample_image_remains_available(tmp_path: Path) -> None:
+    settings = Settings(
+        _env_file=None,
+        shape_library_path=tmp_path / "library.sqlite3",
+        neural_shape_model_path=tmp_path / "missing-model.pt",
+    )
+    app = create_app(settings, video_results=tmp_path / "results")
+    filename = f"{'a' * 64}.png"
+    image_path = app.state.shape_library.image_root / "cube" / filename
+    image_path.parent.mkdir(parents=True)
+    image_path.write_bytes(b"legacy cube image")
+    client = TestClient(app)
+
+    response = client.get(f"/api/shapes/images/cube/{filename}")
+
+    assert response.status_code == 200
+    assert response.content == b"legacy cube image"
+
+
 def test_reset_only_removes_results_from_its_app(tmp_path: Path) -> None:
     settings = Settings(
         _env_file=None,

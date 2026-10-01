@@ -256,8 +256,12 @@ def test_annotation_font_scales_for_high_resolution_frames() -> None:
 
     small_label = np.zeros((360, 640, 3), dtype=np.uint8)
     large_label = np.zeros((1080, 1920, 3), dtype=np.uint8)
-    VideoProcessor._draw_label(small_label, ("KHOI HOP",), 30, 120, 90, (255, 150, 40), (0, 0, 255))
-    VideoProcessor._draw_label(large_label, ("KHOI HOP",), 30, 120, 250, (255, 150, 40), (0, 0, 255))
+    VideoProcessor._draw_label(
+        small_label, ("KHOI HOP",), 30, 120, 90, (255, 150, 40), (0, 0, 255)
+    )
+    VideoProcessor._draw_label(
+        large_label, ("KHOI HOP",), 30, 120, 250, (255, 150, 40), (0, 0, 255)
+    )
     small_height = np.count_nonzero(np.any(small_label[:120, 30:280] != 0, axis=2))
     large_height = np.count_nonzero(np.any(large_label[:120, 30:280] != 0, axis=2))
     assert large_height > small_height
@@ -275,6 +279,17 @@ def test_solid_annotation_does_not_display_conflicting_outline() -> None:
     assert VideoProcessor._shape_name(detection) == "KHOI CAU"
 
 
+def test_legacy_2d_outline_is_not_displayed_as_a_shape() -> None:
+    detection = Detection(
+        label="product",
+        confidence=0.95,
+        bounding_box=BoundingBox(0, 0, 50, 50),
+        shape="circle",
+    )
+
+    assert VideoProcessor._shape_name(detection) == "CHUA RO"
+
+
 def test_shape_serial_is_above_color_and_inspection_labels() -> None:
     frame = np.zeros((240, 200, 3), dtype=np.uint8)
     detection = Detection(
@@ -290,7 +305,6 @@ def test_shape_serial_is_above_color_and_inspection_labels() -> None:
     VideoProcessor._draw_annotations(frame, [detection])
 
     shape_color = VideoProcessor._color_for_detection("green")
-    status_color = (40, 150, 95)
     upper_band = frame[50:80, 40:141]
     lower_band = frame[181:211, 40:141]
     assert np.any(np.all(upper_band == shape_color, axis=2))

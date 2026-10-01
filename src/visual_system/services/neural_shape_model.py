@@ -135,7 +135,6 @@ class NeuralShapeModel:
         self._load_error: str | None = None
         self._loaded_mtime_ns: int | None = None
         self._attempted_mtime_ns: int | None = None
-        self._enabled_heads: frozenset[str] = frozenset()
 
     @property
     def available(self) -> bool:
@@ -166,22 +165,19 @@ class NeuralShapeModel:
                 raise ValueError("Danh sách lớp hình khối 3D không khớp")
             report = checkpoint.get("deployment_report") or {}
             enabled_heads = frozenset(report.get("deployable_heads", ()))
-            if not enabled_heads.intersection({"outline", "solid"}):
+            if "solid" not in enabled_heads:
                 raise ValueError(
-                    "Checkpoint chưa đạt tiêu chí validation 85% theo từng lớp; "
-                    "đang dùng nhận dạng heuristic dự phòng"
+                    "Checkpoint chưa đạt tiêu chí validation 85% cho nhánh khối 3D"
                 )
             model.load_state_dict(checkpoint["model_state_dict"])
             model.eval()
             self._torch, self._model = torch, model
-            self._enabled_heads = enabled_heads
             self._loaded_mtime_ns = checkpoint_mtime
             self._load_error = None
             return True
         except Exception as exc:  # Broken/old checkpoint should not stop video analysis.
             self._model = None
             self._torch = None
-            self._enabled_heads = frozenset()
             self._loaded_mtime_ns = None
             self._load_error = str(exc)
             return False
@@ -194,7 +190,7 @@ class NeuralShapeModel:
         self,
         image: np.ndarray,
         mask: np.ndarray | None = None,
-    ) -> dict[str, tuple[str, float]] | None:
+    ) -> tuple[str, float] | None:
         if not self._load():
             return None
         prepared = prepare_image(image, mask)
@@ -205,26 +201,11 @@ class NeuralShapeModel:
             .unsqueeze(0)
         )
         with self._torch.inference_mode():
-            outline_logits, solid_logits = self._model(tensor)
-            outline = self._torch.softmax(outline_logits[0], dim=0)
+            _, solid_logits = self._model(tensor)
             solid = self._torch.softmax(solid_logits[0], dim=0)
-        if "outline" in self._enabled_heads:
-            outline_index = int(outline.argmax().item())
-            outline_result = (
-                OUTLINE_CLASSES[outline_index],
-                float(outline[outline_index].item()),
-            )
-        else:
-            outline_result = ("unknown", 0.0)
-        if "solid" in self._enabled_heads:
-            solid_index = int(solid.argmax().item())
-            solid_label = SOLID_CLASSES[solid_index]
-            solid_confidence = float(solid[solid_index].item())
-        else:
-            solid_label, solid_confidence = "none", 0.0
-        solid_result = (
-            ("unknown", solid_confidence)
-            if solid_label == "none" or solid_confidence < self.confidence_threshold
-            else (solid_label, solid_confidence)
-        )
-        return {"outline": outline_result, "solid": solid_result}
+        solid_index = int(solid.argmax().item())
+        solid_label = SOLID_CLASSES[solid_index]
+        solid_confidence = float(solid[solid_index].item())
+        if solid_label == "none" or solid_confidence < self.confidence_threshold:
+            return "unknown", solid_confidence
+        return solid_label, solid_confidence

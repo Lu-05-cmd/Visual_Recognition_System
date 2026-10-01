@@ -27,6 +27,9 @@ SHAPE_LABELS = frozenset(
         "box",
     }
 )
+SOLID_SHAPE_LABELS = frozenset({"sphere", "cylinder", "cone", "box"})
+LEGACY_SOLID_SHAPE_LABELS = frozenset({"cube", "cuboid"})
+SHAPE_IMAGE_LABELS = SHAPE_LABELS | LEGACY_SOLID_SHAPE_LABELS
 
 
 class ShapeFeatureLibrary:
@@ -69,7 +72,8 @@ class ShapeFeatureLibrary:
                 connection.execute("ALTER TABLE shape_samples ADD COLUMN descriptor TEXT")
             if "descriptor_version" not in columns:
                 connection.execute(
-                    "ALTER TABLE shape_samples ADD COLUMN descriptor_version INTEGER NOT NULL DEFAULT 0"
+                    "ALTER TABLE shape_samples ADD COLUMN "
+                    "descriptor_version INTEGER NOT NULL DEFAULT 0"
                 )
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_shape_samples_label ON shape_samples(label)"
@@ -91,7 +95,8 @@ class ShapeFeatureLibrary:
                 descriptor = self._descriptor(extracted) if extracted else None
                 if descriptor is not None:
                     connection.execute(
-                        "UPDATE shape_samples SET descriptor = ?, descriptor_version = ? WHERE id = ?",
+                        "UPDATE shape_samples SET descriptor = ?, "
+                        "descriptor_version = ? WHERE id = ?",
                         (json.dumps(descriptor), self.descriptor_version, sample_id),
                     )
 

@@ -17,15 +17,17 @@ class VisionPipeline:
         min_area: int = 400,
         max_distance: float = 120.0,
         max_missed_frames: int = 20,
-        shape_library: ShapeFeatureLibrary | None = None,
         neural_model_path: str | None = None,
         detector: Detector | None = None,
+        shape_library_path: str | None = None,
     ) -> None:
         self.detector = detector if detector is not None else ColorBlobDetector(min_area)
         self.color_recognizer = DominantColorRecognizer()
         neural_model = NeuralShapeModel(neural_model_path) if neural_model_path else None
-        self.shape_recognizer = ShapeRecognizer(neural_model)
-        self.shape_library = shape_library
+        shape_library = (
+            ShapeFeatureLibrary(shape_library_path) if shape_library_path else None
+        )
+        self.shape_recognizer = ShapeRecognizer(neural_model, shape_library)
         self.tracker = CentroidTracker(max_distance, max_missed_frames)
         self.inspector = BasicInspector()
         self._frame_id = 0
@@ -33,7 +35,7 @@ class VisionPipeline:
     def process(self, frame: np.ndarray) -> FrameResult:
         detections = self.detector.detect(frame)
         self.color_recognizer.recognize(frame, detections)
-        self.shape_recognizer.recognize(frame, detections, feature_library=self.shape_library)
+        self.shape_recognizer.recognize(frame, detections)
         self.tracker.update(detections)
         self.inspector.inspect(frame, detections)
         self._frame_id += 1

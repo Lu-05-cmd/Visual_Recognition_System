@@ -11,7 +11,6 @@ import numpy as np
 from visual_system.models import InspectionStatus
 from visual_system.pipeline import VisionPipeline
 from visual_system.ports import Detector
-from visual_system.services.shape_library import ShapeFeatureLibrary
 
 
 @dataclass(frozen=True)
@@ -40,14 +39,14 @@ class VideoProcessor:
         min_area: int,
         max_distance: float,
         max_missed_frames: int,
-        shape_library: ShapeFeatureLibrary | None = None,
         neural_model_path: str | Path | None = None,
         detector_factory: Callable[[], Detector] | None = None,
+        shape_library_path: str | Path | None = None,
     ) -> None:
         self.pipeline_config = (min_area, max_distance, max_missed_frames)
-        self.shape_library = shape_library
         self.neural_model_path = neural_model_path
         self.detector_factory = detector_factory
+        self.shape_library_path = shape_library_path
 
     def process(
         self,
@@ -76,19 +75,18 @@ class VideoProcessor:
 
         pipeline = VisionPipeline(
             *self.pipeline_config,
-            shape_library=self.shape_library,
             neural_model_path=self.neural_model_path,
             detector=(
                 self.detector_factory()
                 if self.detector_factory is not None
                 else None
             ),
+            shape_library_path=self.shape_library_path,
         )
         tracks: set[int] = set()
         serials_by_track: dict[int, int] = {}
         color_serial_counts: Counter[str] = Counter()
         color_votes: dict[int, Counter[str]] = defaultdict(Counter)
-        outline_shape_votes: dict[int, Counter[str]] = defaultdict(Counter)
         solid_shape_votes: dict[int, Counter[str]] = defaultdict(Counter)
         inspection_votes: dict[int, Counter[str]] = defaultdict(Counter)
         processed_frames = 0
@@ -145,7 +143,6 @@ class VideoProcessor:
                         continue
                     tracks.add(item.track_id)
                     color_votes[item.track_id][item.color or "unknown"] += 1
-                    outline_shape_votes[item.track_id][item.shape or "unknown"] += 1
                     solid_shape_votes[item.track_id][item.solid_shape or "unknown"] += 1
                     inspection_votes[item.track_id][item.inspection.value] += 1
         finally:
@@ -162,7 +159,6 @@ class VideoProcessor:
         failed = 0
         for track_id in tracks:
             color = color_votes[track_id].most_common(1)[0][0]
-            outline_shape = outline_shape_votes[track_id].most_common(1)[0][0]
             solid_votes = solid_shape_votes[track_id]
             solid_shape = (
                 next(
@@ -173,9 +169,7 @@ class VideoProcessor:
             unique_colors[color] += 1
             if solid_shape != "unknown":
                 unique_solid_shapes[solid_shape] += 1
-            else:
-                unique_outline_shapes[outline_shape] += 1
-            unique_shapes[solid_shape if solid_shape != "unknown" else outline_shape] += 1
+            unique_shapes[solid_shape] += 1
             statuses = inspection_votes[track_id]
             if statuses["pass"] > statuses["fail"]:
                 passed += 1
@@ -340,20 +334,9 @@ class VideoProcessor:
             "cylinder": "KHOI TRU",
             "cone": "KHOI NON",
         }
-        flat_names = {
-            "triangle": "TAM GIAC",
-            "square": "VUONG",
-            "rectangle": "CHU NHAT",
-            "pentagon": "NGU GIAC",
-            "hexagon": "LUC GIAC",
-            "circle": "TRON",
-            "oval": "OVAL",
-            "polygon": "DA GIAC",
-        }
-        outline_name = flat_names.get(detection.shape, "CHUA RO")
         solid_name = solid_names.get(detection.solid_shape)
         if not solid_name:
-            return outline_name
+            return "CHUA RO"
         return solid_name
 
     @staticmethod

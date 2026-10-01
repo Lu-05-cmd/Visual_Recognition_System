@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import pytest
 
 from visual_system.models import BoundingBox, Detection
 from visual_system.pipeline import VisionPipeline
@@ -38,7 +39,7 @@ def test_pipeline_detects_colors_and_assigns_tracks() -> None:
 
     assert len(result.detections) == 2
     assert {item.color for item in result.detections} == {"red", "green"}
-    assert {item.shape for item in result.detections} == {"square", "circle"}
+    assert {item.shape for item in result.detections} == {"unknown"}
     assert {item.solid_shape for item in result.detections} == {"unknown"}
     assert {item.track_id for item in result.detections} == {1, 2}
     assert all(item.inspection.value == "pass" for item in result.detections)
@@ -54,7 +55,8 @@ def test_pipeline_detects_neutral_object_against_light_background() -> None:
         result = pipeline.process(frame)
 
     assert len(result.detections) == 1
-    assert result.detections[0].shape == "square"
+    assert result.detections[0].shape == "unknown"
+    assert result.detections[0].solid_shape == "unknown"
 
 
 def test_pipeline_detects_edge_objects_on_a_conveyor_without_using_belt_as_shape():
@@ -79,9 +81,7 @@ def test_pipeline_detects_edge_objects_on_a_conveyor_without_using_belt_as_shape
     assert [item.color for item in result.detections] == [
         "purple", "purple", "blue", "green", "yellow", "orange", "red"
     ]
-    assert [item.shape for item in result.detections] == [
-        "unknown", "rectangle", "circle", "triangle", "rectangle", "square", "circle"
-    ]
+    assert all(item.shape == "unknown" for item in result.detections)
     assert all(item.solid_shape == "unknown" for item in result.detections)
 
 
@@ -111,6 +111,13 @@ def test_pipeline_ignores_conveyor_as_object_and_finds_small_purple_object():
 
     assert len(result.detections) == 3
     assert [item.color for item in result.detections] == ["red", "purple", "purple"]
+    assert [item.solid_shape for item in result.detections] == [
+        "unknown", "unknown", "unknown"
+    ]
+
+    for _ in range(2):
+        result = pipeline.process(frame)
+
     assert [item.solid_shape for item in result.detections] == [
         "box", "box", "unknown"
     ]
@@ -188,11 +195,43 @@ def test_shape_recognizer_identifies_shaded_sphere() -> None:
 
     ShapeRecognizer().recognize(frame, [detection])
 
-    assert detection.shape == "circle"
+    assert detection.shape == "unknown"
     assert detection.solid_shape == "sphere"
 
 
-def test_shape_recognizer_identifies_rounded_cylinder_profile() -> None:
+@pytest.mark.parametrize("vertical_radius", (44, 28))
+def test_shape_recognizer_uses_oval_outline_and_shading_for_sphere(
+    vertical_radius: int,
+) -> None:
+    size = 120
+    yy, xx = np.mgrid[:size, :size]
+    normalized_radius = np.sqrt(((xx - 60) / 44) ** 2 + ((yy - 60) / vertical_radius) ** 2)
+    inside = normalized_radius <= 1
+    brightness = np.zeros((size, size), dtype=np.uint8)
+    brightness[inside] = np.clip(
+        255 - 180 * normalized_radius[inside], 60, 255
+    ).astype(np.uint8)
+    frame = np.zeros((size, size, 3), dtype=np.uint8)
+    frame[:, :, 2] = brightness
+    detection = Detection("product", 0.95, BoundingBox(0, 0, size, size), color="red")
+
+    ShapeRecognizer().recognize(frame, [detection])
+
+    assert detection.solid_shape == "sphere"
+
+
+def test_flat_oval_without_depth_shading_remains_unknown() -> None:
+    frame = np.zeros((120, 120, 3), dtype=np.uint8)
+    cv2.ellipse(frame, (60, 60), (44, 28), 0, 0, 360, (0, 0, 220), -1)
+    detection = Detection("product", 0.95, BoundingBox(0, 0, 120, 120), color="red")
+
+    ShapeRecognizer().recognize(frame, [detection])
+
+    assert detection.shape == "unknown"
+    assert detection.solid_shape == "unknown"
+
+
+def test_shape_recognizer_does_not_infer_cylinder_from_flat_rounded_silhouette() -> None:
     frame = np.zeros((160, 120, 3), dtype=np.uint8)
     cv2.rectangle(frame, (38, 42), (82, 118), (0, 0, 255), -1)
     cv2.circle(frame, (60, 42), 22, (0, 0, 255), -1)
@@ -201,7 +240,7 @@ def test_shape_recognizer_identifies_rounded_cylinder_profile() -> None:
 
     ShapeRecognizer().recognize(frame, [detection])
 
-    assert detection.solid_shape == "cylinder"
+    assert detection.solid_shape == "unknown"
 
 
 def test_shape_recognizer_uses_elliptical_rim_to_identify_cylinder() -> None:
@@ -311,7 +350,32 @@ def test_shape_recognizer_uses_nearest_colored_object_when_objects_share_frame()
 
     ShapeRecognizer().recognize(frame, detections)
 
-    assert [item.shape for item in detections] == ["circle", "rectangle", "triangle"]
+    assert [item.shape for item in detections] == ["unknown"] * len(detections)
+
+
+def test_confirmed_box_cue_resolves_similar_unknown_products_in_same_frame(monkeypatch) -> None:
+    frame = np.zeros((90, 250, 3), dtype=np.uint8)
+    cv2.rectangle(frame, (20, 20), (69, 69), (0, 200, 255), -1)
+    cv2.rectangle(frame, (45, 20), (69, 69), (0, 155, 198), -1)
+    cv2.rectangle(frame, (100, 20), (149, 69), (0, 200, 255), -1)
+    cv2.rectangle(frame, (180, 20), (229, 69), (0, 0, 255), -1)
+    detections = [
+        Detection("product", 0.95, BoundingBox(20, 20, 50, 50), color="yellow"),
+        Detection("product", 0.95, BoundingBox(100, 20, 50, 50), color="yellow"),
+        Detection("product", 0.95, BoundingBox(180, 20, 50, 50), color="red"),
+    ]
+    recognizer = ShapeRecognizer()
+    monkeypatch.setattr(
+        recognizer,
+        "_classify_solid_extracted",
+        lambda crop, extracted: (
+            "box" if float(np.std(crop[:, :, 1])) >= 10 else "unknown"
+        ),
+    )
+
+    recognizer.recognize(frame, detections)
+
+    assert [item.solid_shape for item in detections] == ["box", "box", "unknown"]
 
 
 def _solid_shape(frame: np.ndarray) -> str:

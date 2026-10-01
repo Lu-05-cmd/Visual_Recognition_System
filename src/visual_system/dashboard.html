@@ -79,7 +79,7 @@
     }
 
     .tab-button {
-      min-width: 180px;
+      min-width: 50%;
       border-radius: 4px 4px 0 0;
       color: var(--muted);
       background: #1a2729;
@@ -390,7 +390,7 @@
         <div class="toolbar">
           <div>
             <h2 id="shape-library-heading">Bổ sung mẫu hình dạng</h2>
-            <p class="section-note">Tọa độ 3D: độ tròn, độ cân đối và độ phức tạp đường viền.</p>
+            <p class="section-note">Chỉ bổ sung ảnh mẫu khối 3D: cầu, trụ, nón và hộp.</p>
           </div>
         </div>
           <span id="shape-library-status" class="status shape-library-status" aria-live="polite">Đang tải kho mẫu...</span>
@@ -399,14 +399,6 @@
               <label for="shape-sample-label">Tên hình dạng</label>
               <select id="shape-sample-label" name="label" required>
                 <option value="" selected disabled>Chọn hình dạng</option>
-                <option value="circle">Hình tròn</option>
-                <option value="oval">Hình oval</option>
-                <option value="triangle">Tam giác</option>
-                <option value="rectangle">Hình chữ nhật</option>
-                <option value="square">Hình vuông</option>
-                <option value="pentagon">Ngũ giác</option>
-                <option value="hexagon">Lục giác</option>
-                <option value="polygon">Đa giác</option>
                 <option value="sphere">Khối cầu</option>
                 <option value="cylinder">Hình trụ</option>
                 <option value="cone">Khối nón</option>
@@ -521,12 +513,9 @@
       const colorSummary = Object.entries(summary.unique_colors)
         .map(([name, count]) => (colorNames[name] || name) + ': ' + count)
         .join(', ') || 'Chưa có dữ liệu';
-      const outlineSummary = Object.entries(summary.unique_outline_shapes || {})
+      const solidSummary = Object.entries(summary.unique_shapes || {})
         .map(([name, count]) => (shapeNames[name] || name) + ': ' + count)
         .join(', ') || 'Chưa có dữ liệu';
-      const solidSummary = Object.entries(summary.unique_solid_shapes || {})
-        .map(([name, count]) => (shapeNames[name] || name) + ': ' + count)
-        .join(', ') || 'Chưa xác nhận khối 3D';
       document.getElementById('video-summary').innerHTML = `
         <div class="metric"><span>Số khung hình</span>
           <strong>${summary.processed_frames}</strong></div>
@@ -541,9 +530,7 @@
           <span class="fail">${summary.failed}</span></strong></div>
         <div class="metric metric-wide"><span>Màu sắc</span>
           <span>${colorSummary}</span></div>
-        <div class="metric metric-wide"><span>Đường viền 2D</span>
-          <span>${outlineSummary}</span></div>
-        <div class="metric metric-wide"><span>Khối 3D đã xác nhận</span>
+        <div class="metric metric-wide"><span>Phân loại khối 3D</span>
           <span>${solidSummary}</span></div>`;
     }
 

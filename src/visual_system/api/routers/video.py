@@ -37,7 +37,6 @@ async def process_video(
     job_id = uuid4().hex
     video_results = request.app.state.video_results
     settings = request.app.state.settings
-    shape_library = request.app.state.shape_library
     input_path = video_results / f"{job_id}{suffix}"
     output_path = video_results / f"{job_id}-annotated.mp4"
     processing_started = perf_counter()
@@ -49,9 +48,9 @@ async def process_video(
             settings.detection_min_area,
             settings.track_max_distance,
             settings.track_max_missed_frames,
-            shape_library,
-            settings.neural_shape_model_path,
-            request.app.state.detector_factory,
+            neural_model_path=settings.neural_shape_model_path,
+            detector_factory=request.app.state.detector_factory,
+            shape_library_path=settings.shape_library_path,
         ).process(input_path, output_path, target_color=target_color)
     finally:
         input_path.unlink(missing_ok=True)

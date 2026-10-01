@@ -1,36 +1,35 @@
 import cv2
 import numpy as np
+from typing import TYPE_CHECKING
 
 from visual_system.models import Detection
 from visual_system.services.neural_shape_model import NeuralShapeModel
 
+if TYPE_CHECKING:
+    from visual_system.services.shape_library import ShapeFeatureLibrary
+
 
 class ShapeRecognizer:
-    def __init__(self, neural_model: NeuralShapeModel | None = None) -> None:
+    def __init__(
+        self,
+        neural_model: NeuralShapeModel | None = None,
+        shape_library: "ShapeFeatureLibrary | None" = None,
+    ) -> None:
         self.neural_model = neural_model
+        self.shape_library = shape_library
 
     def recognize(
         self,
         frame: np.ndarray,
         detections: list[Detection],
-        masks: list[np.ndarray] | None = None,
-        feature_library=None,
     ) -> list[Detection]:
         for detection in detections:
+            detection.shape = "unknown"
             box = detection.bounding_box
             crop = frame[box.y : box.y + box.height, box.x : box.x + box.width]
-            # A generic foreground mask can join an object to a conveyor belt or
-            # its shadow. Segment from this detection's own color instead of
-            # selecting whichever full-frame mask has the most pixels in its box.
             extracted = self._extract_contour(crop, detection.color)
-            # A detector box may tightly fit the object, so an ordinary object
-            # can touch the crop border. Only suppress shape labels when the
-            # original image itself cuts the detection off at an outer edge.
             truncated = self._detection_is_truncated(frame.shape, box, extracted)
-            detection.shape = (
-                "unknown" if truncated else self._classify_extracted(extracted)
-            )
-            detection.solid_shape = (
+            heuristic_shape = (
                 "unknown"
                 if truncated
                 else self._classify_solid_extracted(crop, extracted)
@@ -43,34 +42,79 @@ class ShapeRecognizer:
                 if self.neural_model and not truncated
                 else None
             )
+            neural_shape = None
             if neural_result:
-                neural_outline, outline_confidence = neural_result["outline"]
-                neural_solid, solid_confidence = neural_result["solid"]
-                # The outline and solid labels are independent. Require a strong
-                # neural margin before it can replace deterministic contour cues.
-                if outline_confidence >= self.neural_model.confidence_threshold:
-                    detection.shape = neural_outline
+                neural_solid, solid_confidence = neural_result
                 if (
                     neural_solid != "unknown"
                     and solid_confidence >= self.neural_model.confidence_threshold
                 ):
-                    detection.solid_shape = neural_solid
-            learned_shape = (
-                feature_library.classify(
+                    neural_shape = neural_solid
+            library_shape = None
+            if (
+                self.shape_library
+                and extracted
+                and not truncated
+                and heuristic_shape == "unknown"
+            ):
+                library_shape = self.shape_library.classify(
                     extracted,
-                    labels={
-                        "circle", "oval", "triangle", "rectangle", "square",
-                        "pentagon", "hexagon", "polygon",
-                    },
+                    labels={"sphere", "cylinder", "cone", "box"},
                 )
-                if feature_library
-                else None
+                if library_shape and self._is_flat_silhouette_only(extracted):
+                    library_shape = None
+            detection.solid_shape = (
+                neural_shape or library_shape or heuristic_shape
             )
-            # The sample library sees a 2D contour and must never infer depth.
-            # It may refine a generic polygon label only.
-            if learned_shape and detection.shape == "polygon":
-                detection.shape = learned_shape
+        confirmed_boxes = [
+            detection
+            for detection in detections
+            if detection.solid_shape == "box" and detection.color != "unknown"
+        ]
+        for detection in detections:
+            if detection.solid_shape != "unknown" or detection.color == "unknown":
+                continue
+            if any(
+                candidate is not detection
+                and self._has_similar_box_appearance(candidate, detection)
+                for candidate in confirmed_boxes
+            ):
+                detection.solid_shape = "box"
         return detections
+
+    @staticmethod
+    def _is_flat_silhouette_only(extracted) -> bool:
+        """Reject 3D labels from flat, uniformly-colored silhouettes."""
+        mask, contour = extracted
+        object_mask = np.zeros(mask.shape, dtype=np.uint8)
+        cv2.drawContours(object_mask, [contour], -1, 255, -1)
+        # Plain crop is not available here; estimate from mask and contour bounds
+        gray_estimate = cv2.Canny(mask, 50, 150)
+        object_pixels = cv2.countNonZero(object_mask)
+        edge_pixels = cv2.countNonZero(
+            cv2.bitwise_and(gray_estimate, object_mask)
+        )
+        if object_pixels < 10:
+            return True
+        # High edge density inside a small object suggests internal detail (shading, facets).
+        edge_ratio = edge_pixels / max(object_pixels, 1)
+        return edge_ratio < 0.05
+
+
+    @staticmethod
+    def _has_similar_box_appearance(first: Detection, second: Detection) -> bool:
+        if first.color != second.color:
+            return False
+        first_box = first.bounding_box
+        second_box = second.bounding_box
+        first_aspect = first_box.width / max(first_box.height, 1)
+        second_aspect = second_box.width / max(second_box.height, 1)
+        if abs(np.log(max(first_aspect, 1e-6) / max(second_aspect, 1e-6))) > 0.2:
+            return False
+        first_area = first_box.width * first_box.height
+        second_area = second_box.width * second_box.height
+        area_ratio = first_area / max(second_area, 1)
+        return 0.6 <= area_ratio <= 1.67
 
     @staticmethod
     def _mask_touches_edge(mask: np.ndarray) -> bool:
@@ -89,73 +133,31 @@ class ShapeRecognizer:
         contour = extracted[1]
         x, y, width, height = cv2.boundingRect(contour)
         frame_height, frame_width = frame_shape[:2]
-        edge_contact = (
-            (box.x <= 0 and x == 0 and cv2.countNonZero(mask[:, 0]) > mask.shape[0] * 0.65)
-            or (box.y <= 0 and y == 0 and cv2.countNonZero(mask[0, :]) > mask.shape[1] * 0.65)
-            or (
-                box.x + box.width >= frame_width
-                and x + width >= mask.shape[1]
-                and cv2.countNonZero(mask[:, -1]) > mask.shape[0] * 0.65
-            )
-            or (
-                box.y + box.height >= frame_height
-                and y + height >= mask.shape[0]
-                and cv2.countNonZero(mask[-1, :]) > mask.shape[1] * 0.65
-            )
+        left_edge = (
+            box.x <= 0
+            and x == 0
+            and cv2.countNonZero(mask[:, 0]) > mask.shape[0] * 0.65
         )
-        if not edge_contact:
+        top_edge = (
+            box.y <= 0 and y == 0 and cv2.countNonZero(mask[0, :]) > mask.shape[1] * 0.65
+        )
+        right_edge = (
+            box.x + box.width >= frame_width
+            and x + width >= mask.shape[1]
+            and cv2.countNonZero(mask[:, -1]) > mask.shape[0] * 0.65
+        )
+        bottom_edge = (
+            box.y + box.height >= frame_height
+            and y + height >= mask.shape[0]
+            and cv2.countNonZero(mask[-1, :]) > mask.shape[1] * 0.65
+        )
+        if not any((left_edge, top_edge, right_edge, bottom_edge)):
             return False
-        # Color segmentation can leak a few pixels at the image border due to
-        # antialiasing/noise. Treat it as clipped only when most of the contour
-        # bbox reaches the border, as with a genuinely cropped object.
-        border_span = (
-            height if box.x <= 0 and x == 0 and cv2.countNonZero(mask[:, 0]) > mask.shape[0] * 0.65
-            else width if box.y <= 0 and y == 0 and cv2.countNonZero(mask[0, :]) > mask.shape[1] * 0.65
-            else height if box.x + box.width >= frame_width and x + width >= mask.shape[1] and cv2.countNonZero(mask[:, -1]) > mask.shape[0] * 0.65
-            else width if box.y + box.height >= frame_height and y + height >= mask.shape[0] and cv2.countNonZero(mask[-1, :]) > mask.shape[1] * 0.65
-            else 0
-        )
-        corresponding_size = mask.shape[0] if box.x <= 0 or box.x + box.width >= frame_width else mask.shape[1]
+        # Ignore small segmentation leaks; only reject a contour that spans
+        # most of the original frame edge.
+        border_span = height if left_edge or right_edge else width
+        corresponding_size = mask.shape[0] if left_edge or right_edge else mask.shape[1]
         return border_span >= corresponding_size * 0.65
-
-    @classmethod
-    def _classify(cls, crop: np.ndarray) -> str:
-        extracted = cls._extract_contour(crop)
-        return cls._classify_extracted(extracted)
-
-    @classmethod
-    def _classify_extracted(cls, extracted) -> str:
-        if extracted is None:
-            return "unknown"
-
-        _, contour = extracted
-        perimeter = cv2.arcLength(contour, True)
-        if perimeter == 0:
-            return "unknown"
-
-        hull = cv2.convexHull(contour)
-        approximation = cv2.approxPolyDP(hull, 0.04 * cv2.arcLength(hull, True), True)
-        vertex_count = len(approximation)
-        area = cv2.contourArea(contour)
-        circularity = 4 * np.pi * area / (perimeter * perimeter)
-        roundness = cls._ellipse_roundness(contour)
-        rotated_width, rotated_height = cv2.minAreaRect(contour)[1]
-        rotated_extent = area / max(rotated_width * rotated_height, 1)
-        rotated_ratio = max(rotated_width, rotated_height) / max(
-            min(rotated_width, rotated_height), 1
-        )
-        if roundness <= 0.035 and circularity >= 0.68 and rotated_extent <= 0.88:
-            return "circle" if rotated_ratio <= 1.15 else "oval"
-        if vertex_count == 3:
-            return "triangle"
-        if vertex_count == 4:
-            return "square" if rotated_ratio <= 1.1 else "rectangle"
-        if vertex_count == 5:
-            return "pentagon"
-        if vertex_count == 6:
-            return "hexagon"
-
-        return "polygon"
 
     @staticmethod
     def _ellipse_roundness(contour: np.ndarray) -> float:
@@ -193,10 +195,6 @@ class ShapeRecognizer:
         vertex_count = len(approximation)
         _, _, width, height = cv2.boundingRect(contour)
         aspect_ratio = max(width, height) / max(min(width, height), 1)
-        rotated_width, rotated_height = cv2.minAreaRect(contour)[1]
-        projected_aspect = max(rotated_width, rotated_height) / max(
-            min(rotated_width, rotated_height), 1
-        )
         circularity = 4 * np.pi * cv2.contourArea(contour) / (perimeter * perimeter)
 
         object_mask = np.zeros(mask.shape, dtype=np.uint8)
@@ -205,8 +203,15 @@ class ShapeRecognizer:
         values = gray[object_mask > 0]
         if values.size == 0:
             return "unknown"
-        shading_range = float(np.percentile(values, 90) - np.percentile(values, 10))
-        has_shading = shading_range >= 20 and float(np.std(values)) >= 8
+        brightness_values = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)[:, :, 2][
+            object_mask > 0
+        ]
+        shading_range = float(
+            np.percentile(brightness_values, 90) - np.percentile(brightness_values, 10)
+        )
+        has_shading = shading_range >= 20 and float(np.std(brightness_values)) >= 8
+        outline_shape = cls._classify_outline(contour)
+        ellipse_roundness = cls._ellipse_roundness(contour)
         has_elliptical_rim = cls._has_elliptical_rim(
             gray,
             object_mask,
@@ -227,9 +232,20 @@ class ShapeRecognizer:
         ):
             return "unknown"
 
-        if circularity >= 0.78 and aspect_ratio <= 1.15 and vertex_count >= 7:
+        sphere_like_outline = (
+            outline_shape in {"circle", "oval"}
+            and aspect_ratio <= 1.7
+            and ellipse_roundness <= 0.16
+            and not has_internal_facets
+        )
+        if (
+            circularity >= 0.78
+            and aspect_ratio <= 1.15
+            and vertex_count >= 7
+            and not has_internal_facets
+        ) or sphere_like_outline:
             return "sphere" if has_shading else "unknown"
-        if vertex_count == 3:
+        if vertex_count == 3 or outline_shape == "triangle":
             return (
                 "cone"
                 if has_internal_facets
@@ -239,12 +255,42 @@ class ShapeRecognizer:
         # A cylinder needs a rounded end cue. A plain elongated rectangle is
         # not enough because box faces and shadows often create the same ratio.
         if aspect_ratio >= 1.15 and (
-            has_elliptical_rim or has_cylinder_rim or (has_rounded_ends and not has_internal_facets)
+            has_elliptical_rim
+            or has_cylinder_rim
+            or (has_rounded_ends and has_shading and not has_internal_facets)
         ):
             return "cylinder"
-        if has_internal_facets and vertex_count in {4, 5, 6}:
+        if has_internal_facets:
             return "box"
         return "unknown"
+
+    @staticmethod
+    def _classify_outline(contour: np.ndarray) -> str:
+        perimeter = cv2.arcLength(contour, True)
+        if perimeter <= 0:
+            return "unknown"
+        hull = cv2.convexHull(contour)
+        hull_perimeter = cv2.arcLength(hull, True)
+        if hull_perimeter <= 0:
+            return "unknown"
+        approximation = cv2.approxPolyDP(hull, 0.04 * hull_perimeter, True)
+        vertices = len(approximation)
+        area = cv2.contourArea(contour)
+        circularity = 4 * np.pi * area / max(perimeter * perimeter, 1)
+        rotated_width, rotated_height = cv2.minAreaRect(contour)[1]
+        width, height = max(rotated_width, rotated_height), min(rotated_width, rotated_height)
+        aspect_ratio = width / max(height, 1)
+        if vertices >= 7 and circularity >= 0.6 and aspect_ratio <= 1.7:
+            return "circle" if aspect_ratio <= 1.15 else "oval"
+        if vertices == 3:
+            return "triangle"
+        if vertices == 4:
+            return "square" if aspect_ratio <= 1.15 else "rectangle"
+        if vertices == 5:
+            return "pentagon"
+        if vertices == 6:
+            return "hexagon"
+        return "polygon"
 
     @staticmethod
     def _has_rounded_cylinder_ends(contour: np.ndarray, width: int, height: int) -> bool:

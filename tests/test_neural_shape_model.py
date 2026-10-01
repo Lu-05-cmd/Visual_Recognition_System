@@ -51,7 +51,9 @@ def test_neural_model_reloads_checkpoint_after_retraining(tmp_path: Path):
     )
     model = NeuralShapeModel(checkpoint_path)
     image = np.zeros((40, 40, 3), dtype=np.uint8)
-    assert model.predict(image) is not None
+    prediction = model.predict(image)
+    assert prediction is not None
+    assert prediction[0] in {*SOLID_CLASSES, "unknown"}
 
     previous_time = checkpoint_path.stat().st_mtime_ns
     torch.save({"version": -1}, checkpoint_path)
@@ -80,3 +82,24 @@ def test_legacy_checkpoint_is_rejected_instead_of_overriding_heuristics(tmp_path
 
     assert model.predict(np.zeros((40, 40, 3), dtype=np.uint8)) is None
     assert "phiên bản checkpoint" in model.load_error.lower()
+
+
+def test_checkpoint_without_deployable_solid_head_is_rejected(tmp_path: Path):
+    pytest.importorskip("torch")
+    torch, model_type = _torch_modules()
+    checkpoint_path = tmp_path / "outline-only.pt"
+    torch.save(
+        {
+            "version": CHECKPOINT_VERSION,
+            "model_state_dict": model_type().state_dict(),
+            "outline_classes": list(OUTLINE_CLASSES),
+            "solid_classes": list(SOLID_CLASSES),
+            "deployment_report": {"deployable_heads": ["outline"]},
+        },
+        checkpoint_path,
+    )
+
+    model = NeuralShapeModel(checkpoint_path)
+
+    assert model.predict(np.zeros((40, 40, 3), dtype=np.uint8)) is None
+    assert "khối 3D" in model.load_error

@@ -3,7 +3,10 @@ import numpy as np
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
-from visual_system.services.shape_library import SHAPE_LABELS
+from visual_system.services.shape_library import (
+    SHAPE_IMAGE_LABELS,
+    SOLID_SHAPE_LABELS,
+)
 
 router = APIRouter()
 
@@ -21,10 +24,10 @@ async def add_shape_sample(
 ) -> dict:
     shape_library = request.app.state.shape_library
     normalized_label = label.strip().lower()
-    if normalized_label not in SHAPE_LABELS:
+    if normalized_label not in SOLID_SHAPE_LABELS:
         raise HTTPException(
             status_code=400,
-            detail="Vui lòng chọn một hình dạng có trong danh sách",
+            detail="Chỉ hỗ trợ nhãn khối 3D: sphere, cylinder, cone, box",
         )
 
     if not files:
@@ -86,7 +89,7 @@ def get_shape_sample_image(
     filename: str,
 ) -> FileResponse:
     if (
-        label not in SHAPE_LABELS
+        label not in SHAPE_IMAGE_LABELS
         or len(filename) != 68
         or not filename.endswith(".png")
         or not all(character in "0123456789abcdef" for character in filename[:-4])
