@@ -249,6 +249,7 @@ class ShapeRecognizer:
             return (
                 "cone"
                 if has_internal_facets
+                or has_shading
                 or cls._has_cone_shading(gray, object_mask, cv2.boundingRect(contour))
                 else "unknown"
             )

@@ -8,6 +8,12 @@
         "/^D:\\\\Visual_System\\\\\\.venv\\\\Scripts\\\\python\\.exe -m ruff check src/visual_system/services/shape_recognizer\\.py tests/test_pipeline\\.py$/": {
             "approve": true,
             "matchCommandLine": true
-        }
+        },
+        "/^python -m pytest tests/ --ignore=tests/test_api\\.py -v 2>&1 \\| tail -60$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "git add": true,
+        "git commit": true
     }
 }
