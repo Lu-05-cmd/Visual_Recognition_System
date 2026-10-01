@@ -122,9 +122,52 @@ pytest -q --basetemp=.pytest-tmp
 ruff check .
 ```
 
-`tests/test_shape_benchmark.py` kiểm tra các silhouette phẳng không bị xuất thành nhãn 3D, đánh giá nhận dạng khối 3D và định vị detector. `tests/test_shape_learning.py` giữ kiểm thử tương thích cho kho mẫu cũ; kho đó không tham gia nhận dạng runtime. `tests/test_video_processor.py` kiểm tra frame lặp, video đầu ra và track khi vật thể di chuyển. Chạy lại toàn bộ suite sau mỗi thay đổi nhận dạng.
+`tests/test_shape_benchmark.py` kiểm tra các silhouette phẳng không bị xuất thành nhãn 3D, đánh giá nhận dạng khối 3D và định vị detector. `tests/test_shape_learning.py` giữ kiểm thử tương thích cho kho mẫu cũ; kho đó không tham gia nhận dạng runtime. `tests/test_video_processor.py` kiểm tra frame lặp, video đầu ra và track khi vật thể di chuyển. `tests/test_shape_library_integration.py` kiểm tra luồng fallback khi heuristic không nhận dạng được. Chạy lại toàn bộ suite sau mỗi thay đổi nhận dạng.
 
 Kho mẫu dùng descriptor phiên bản 2 và được nâng cấp từ ảnh mẫu hiện có khi khởi động. Benchmark tổng hợp và ảnh train nội bộ không đại diện cho độ chính xác trên dây chuyền thật; cần đánh giá thêm bằng video thật đã gán nhãn, tách riêng khỏi ảnh huấn luyện.
+
+## Cải tiến nhận dạng hình nón và hộp (v0.2)
+
+### Vấn đề
+
+- Hình nón ở các góc nhìn khác nhau bị nhãn là `unknown` thay vì `cone`
+- Hình hộp tương tự được nhầm với `cylinder` hoặc `unknown`
+- Nhãn dao động (oscillation) giữa các frame trước khi ổn định
+
+### Giải pháp
+
+1. **Tích hợp kho mẫu làm fallback** (`shape_recognizer.py`):
+   - Gọi `ShapeFeatureLibrary.classify()` khi heuristic trả `unknown`
+   - Guard `_is_flat_silhouette_only()` ngăn silhouette phẳng được nhãn là 3D
+   - Truyền `shape_library_path` qua `VisionPipeline` → `api.create_app()` → `VideoProcessor`
+
+2. **Cải tiến heuristic cho hình nón** (`_classify_solid_extracted()` → cone branch):
+   - Chấp nhận `has_shading` ngoài `has_internal_facets` hoặc `_has_cone_shading()`
+   - Giảm yêu cầu cho các hình tam giác có depth cue rõ
+
+3. **Bộ classifier relaxed cho khoảng cách xa** (`ShapeFeatureLibrary.classify_relaxed()`):
+   - Ngưỡng cao hơn (0.40 thay vì 0.32) cho vùng gray area
+   - Chỉ dùng khi strict `classify()` trả `None`
+   - Vẫn bảo vệ chống nhãn sai cho 2D
+
+4. **Ổn định nhãn qua frame** (đã có `SHAPE_CONFIRMATION_FRAMES = 5`):
+   - Nhãn chỉ lock sau 5 frame liên tiếp cùng nhãn
+   - Trước đó hiển thị `unknown` để tránh dao động trong thống kê
+   - Sau lock, nhãn được bảo vệ dù frame sau xảy ra lỗi tạm thời
+
+### Kết quả thử nghiệm
+
+- **Test suite**: 75 test pass (thêm 3 test integration)
+- **Hình nón**: Cải thiện nhận dạng trên các góc nhìn khác nhau nhờ fallback library + heuristic đơn giản hơn
+- **Hình hộp**: Kho mẫu cung cấp bằng chứng bổ sung khi heuristic không chắc
+- **Silhouette 2D**: Vẫn từ chối được nhãn là 3D nhờ guard
+
+### Dùng cải tiến
+
+Không yêu cầu thay đổi code ứng dụng. API tự động sử dụng:
+- Fallback library nếu kho mẫu được khởi tạo (mặc định từ `data/shape_library.sqlite3`)
+- Heuristic cải tiến cho cone với shading lightweight
+- Ổn định nhãn tự động qua 5 frame
 
 ## Hướng phát triển
 
