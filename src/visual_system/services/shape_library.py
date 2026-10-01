@@ -223,6 +223,49 @@ class ShapeFeatureLibrary:
             return None
         return best_label
 
+    def classify_relaxed(
+        self,
+        extracted,
+        labels: set[str] | None = None,
+        relaxed_threshold: float = 0.4,
+    ) -> str | None:
+        """Fallback classifier with relaxed thresholds for low-confidence detections."""
+        if extracted is None:
+            return None
+        query = self._descriptor(extracted)
+        legacy_query = self.coordinates(extracted[1])
+        if query is None or legacy_query is None:
+            return None
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT label, x, y, z, descriptor, descriptor_version FROM shape_samples"
+            ).fetchall()
+        if not rows:
+            return None
+
+        distances = []
+        for label, x, y, z, descriptor_json, version in rows:
+            label = {"cube": "box", "cuboid": "box"}.get(label, label)
+            if labels is not None and label not in labels:
+                continue
+            if descriptor_json and version == self.descriptor_version:
+                try:
+                    reference = np.asarray(json.loads(descriptor_json), dtype=np.float32)
+                    distance = self._descriptor_distance(query, reference)
+                except (ValueError, TypeError):
+                    continue
+            else:
+                distance = float(np.linalg.norm(np.subtract(legacy_query, (x, y, z))))
+            distances.append((distance, label))
+        if not distances:
+            return None
+        distances.sort(key=lambda item: item[0])
+        nearest_distance, nearest_label = distances[0]
+        if nearest_distance > relaxed_threshold:
+            return None
+        return nearest_label
+
     @classmethod
     def _descriptor(cls, extracted) -> tuple[float, ...] | None:
         if extracted is None:

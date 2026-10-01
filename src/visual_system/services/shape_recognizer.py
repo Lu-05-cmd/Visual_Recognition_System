@@ -61,6 +61,12 @@ class ShapeRecognizer:
                     extracted,
                     labels={"sphere", "cylinder", "cone", "box"},
                 )
+                if not library_shape:
+                    library_shape = self.shape_library.classify_relaxed(
+                        extracted,
+                        labels={"sphere", "cylinder", "cone", "box"},
+                        relaxed_threshold=0.40,
+                    )
                 if library_shape and self._is_flat_silhouette_only(extracted):
                     library_shape = None
             detection.solid_shape = (
