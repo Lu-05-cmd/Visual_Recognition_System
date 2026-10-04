@@ -1,6 +1,7 @@
+from typing import TYPE_CHECKING
+
 import cv2
 import numpy as np
-from typing import TYPE_CHECKING
 
 from visual_system.models import Detection
 from visual_system.services.neural_shape_model import NeuralShapeModel
@@ -59,12 +60,12 @@ class ShapeRecognizer:
             ):
                 library_shape = self.shape_library.classify(
                     extracted,
-                    labels={"sphere", "cylinder", "cone", "box"},
+                    labels={"sphere", "cylinder", "cone", "box", "hexagonal_prism"},
                 )
                 if not library_shape:
                     library_shape = self.shape_library.classify_relaxed(
                         extracted,
-                        labels={"sphere", "cylinder", "cone", "box"},
+                        labels={"sphere", "cylinder", "cone", "box", "hexagonal_prism"},
                         relaxed_threshold=0.40,
                     )
                 if library_shape and self._is_flat_silhouette_only(extracted):

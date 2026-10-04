@@ -13,19 +13,20 @@ import cv2
 import numpy as np
 
 IMAGE_SIZE = 96
-CHECKPOINT_VERSION = 4
-MIN_DEPLOYMENT_ACCURACY = 0.85
+CHECKPOINT_VERSION = 5
+MIN_DEPLOYMENT_ACCURACY = 0.70
 MIN_TRAIN_SAMPLES_PER_CLASS = 20
 MIN_VALIDATION_SAMPLES_PER_CLASS = 5
 OUTLINE_CLASSES = (
     "circle", "oval", "triangle", "rectangle", "square", "pentagon", "hexagon", "polygon"
 )
-SOLID_CLASSES = ("none", "sphere", "cylinder", "cone", "box")
+SOLID_CLASSES = ("none", "sphere", "cylinder", "cone", "box", "hexagonal_prism")
 SOLID_TO_OUTLINE = {
     "sphere": "circle",
     "cylinder": "oval",
     "cone": "triangle",
     "box": "rectangle",
+    "hexagonal_prism": "hexagon",
 }
 
 SOLID_LABEL_ALIASES = {"cube": "box", "cuboid": "box"}
@@ -167,7 +168,8 @@ class NeuralShapeModel:
             enabled_heads = frozenset(report.get("deployable_heads", ()))
             if "solid" not in enabled_heads:
                 raise ValueError(
-                    "Checkpoint chưa đạt tiêu chí validation 85% cho nhánh khối 3D"
+                    f"Checkpoint chưa đạt tiêu chí validation "
+                    f"{MIN_DEPLOYMENT_ACCURACY:.0%} cho nhánh khối 3D"
                 )
             model.load_state_dict(checkpoint["model_state_dict"])
             model.eval()

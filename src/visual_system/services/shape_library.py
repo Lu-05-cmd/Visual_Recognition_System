@@ -25,9 +25,12 @@ SHAPE_LABELS = frozenset(
         "cylinder",
         "cone",
         "box",
+        "hexagonal_prism",
     }
 )
-SOLID_SHAPE_LABELS = frozenset({"sphere", "cylinder", "cone", "box"})
+SOLID_SHAPE_LABELS = frozenset(
+    {"sphere", "cylinder", "cone", "box", "hexagonal_prism"}
+)
 LEGACY_SOLID_SHAPE_LABELS = frozenset({"cube", "cuboid"})
 SHAPE_IMAGE_LABELS = SHAPE_LABELS | LEGACY_SOLID_SHAPE_LABELS
 

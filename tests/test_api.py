@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import cv2
 import numpy as np
 from fastapi.testclient import TestClient
 
@@ -100,6 +101,42 @@ def test_shape_sample_upload_rejects_2d_labels(tmp_path: Path) -> None:
 
     assert response.status_code == 400
     assert "khối 3D" in response.json()["detail"]
+
+
+def test_shape_sample_upload_accepts_hexagonal_prism(tmp_path: Path) -> None:
+    settings = Settings(
+        _env_file=None,
+        shape_library_path=tmp_path / "library.sqlite3",
+        neural_shape_model_path=tmp_path / "missing-model.pt",
+    )
+    client = TestClient(create_app(settings, video_results=tmp_path / "results"))
+    image = np.full((140, 140, 3), 235, dtype=np.uint8)
+    top = np.array(
+        [(70, 18), (91, 30), (91, 52), (70, 64), (49, 52), (49, 30)],
+        dtype=np.int32,
+    )
+    bottom = top + np.array((0, 48), dtype=np.int32)
+    for index in range(len(top)):
+        next_index = (index + 1) % len(top)
+        face = np.array(
+            [top[index], top[next_index], bottom[next_index], bottom[index]],
+            dtype=np.int32,
+        )
+        cv2.fillPoly(image, [face], (35 + index * 12, 100, 190))
+    cv2.fillPoly(image, [top], (80, 165, 235))
+    encoded, payload = cv2.imencode(".png", image)
+    assert encoded
+
+    response = client.post(
+        "/api/shapes/samples",
+        data={"label": "hexagonal_prism"},
+        files={"files": ("prism.png", payload.tobytes(), "image/png")},
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["added_count"] == 1
+    assert result["library"]["classes"]["hexagonal_prism"] == 1
 
 
 def test_shape_sample_upload_rejects_legacy_cube_alias(tmp_path: Path) -> None:

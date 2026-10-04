@@ -6,7 +6,7 @@ Nền tảng hệ thống thị giác máy tính công nghiệp tự động ph�
 
 - `ColorBlobDetector`: detector baseline bằng OpenCV, không cần model weights.
 - `DominantColorRecognizer`: nhận dạng màu chính từ vùng sản phẩm.
-- `ShapeRecognizer`: chỉ xuất nhãn khối 3D `sphere`, `cylinder`, `cone`, `box`; nhãn đường viền 2D không được xuất thay nhãn khối. Khi nhận dạng 3D chưa chắc chắn, đường viền (tròn/oval, tam giác, chữ nhật/oval hoặc đa giác) được dùng làm bằng chứng phụ cùng shading, vành tròn hoặc mặt khối; silhouette phẳng vẫn là `unknown`. Có thể dùng heuristic OpenCV và neural solid head nếu checkpoint đạt tiêu chí.
+- `ShapeRecognizer`: chỉ xuất nhãn khối 3D `sphere`, `cylinder`, `cone`, `box`, `hexagonal_prism`; nhãn đường viền 2D không được xuất thay nhãn khối. Khi nhận dạng 3D chưa chắc chắn, đường viền (tròn/oval, tam giác, chữ nhật/oval hoặc đa giác) được dùng làm bằng chứng phụ cùng shading, vành tròn hoặc mặt khối; silhouette phẳng vẫn là `unknown`. Có thể dùng heuristic OpenCV và neural solid head nếu checkpoint đạt tiêu chí.
 - `ShapeFeatureLibrary`: quản lý ảnh mẫu để huấn luyện; dữ liệu đường viền 2D cũ được giữ tương thích nhưng không tham gia nhận dạng runtime và không thể thêm mới qua API.
 - `CentroidTracker`: gán `track_id` ổn định giữa các frame.
 - `BasicInspector`: kiểm tra baseline bằng tỷ lệ cạnh ảnh.
@@ -75,11 +75,11 @@ API upload tương ứng là `POST /api/video/process` với multipart field `fi
 
 Dashboard có mục **Bổ sung mẫu hình dạng** để gửi nhiều ảnh vật thể cùng nhãn. Ảnh gốc được lưu thành PNG trong `data/shape_library/<nhãn>/`, còn thông tin và đặc trưng được lưu trong `data/shape_library.sqlite3`. Có thể xóa riêng từng mẫu. Thêm ảnh vào kho không tự train lại model.
 
-Kho mẫu có thể được xem qua `GET /api/shapes/library` và bổ sung qua `POST /api/shapes/samples` (multipart field `files` nhận nhiều ảnh, field `label` chỉ nhận `sphere`, `cylinder`, `cone`, `box`). Nhãn mẫu cũ `cube` và `cuboid` được gộp thành `box`. Các mẫu đường viền 2D đã lưu từ trước được giữ trong database để tương thích nhưng không được dùng trong nhận dạng runtime.
+Kho mẫu có thể được xem qua `GET /api/shapes/library` và bổ sung qua `POST /api/shapes/samples` (multipart field `files` nhận nhiều ảnh, field `label` nhận `sphere`, `cylinder`, `cone`, `box`, `hexagonal_prism`). Nhãn mẫu cũ `cube` và `cuboid` được gộp thành `box`. Các mẫu đường viền 2D đã lưu từ trước được giữ trong database để tương thích nhưng không được dùng trong nhận dạng runtime; `hexagon` 2D là ví dụ âm `none`, không phải lăng trụ lục giác 3D.
 
 ### Chuẩn bị dữ liệu
 
-- Mỗi ảnh huấn luyện mới nên có **một vật thể 3D chính**, gán một nhãn: `sphere`, `cylinder`, `cone`, `box`.
+- Mỗi ảnh huấn luyện mới nên có **một vật thể 3D chính**, gán một nhãn: `sphere`, `cylinder`, `cone`, `box`, `hexagonal_prism`.
 - Thu thập góc nhìn, khoảng cách, vị trí trong khung, kích thước, màu sắc, ánh sáng và nền khác nhau. Tránh dùng nhiều frame liên tiếp gần như giống nhau làm mẫu độc lập.
 - Ảnh render/xuất từ SolidWorks giúp bổ sung hình học và góc nhìn, nhưng nên trộn với ảnh camera/video thật. Bỏ thanh công cụ, con trỏ, chữ và viền cửa sổ nếu dùng ảnh chụp màn hình. Nền, bóng, màu và độ phản chiếu nên gần điều kiện camera thực tế.
 - Chia dữ liệu theo lần chụp/điều kiện quay: giữ các video thật riêng để kiểm tra cuối, không đưa các frame của cùng một đoạn video vào cả train và validation. Nếu ảnh gần trùng nhau nằm ở hai tập, điểm validation có thể cao giả tạo.
@@ -87,7 +87,7 @@ Kho mẫu có thể được xem qua `GET /api/shapes/library` và bổ sung qua
 
 ### Train và checkpoint
 
-Checkpoint hiện có hai đầu ra để giữ tương thích cấu trúc với model cũ; ứng dụng chỉ sử dụng đầu 3D (`sphere`, `cylinder`, `cone`, `box`), bỏ qua hoàn toàn đầu 2D và từ chối checkpoint không đạt quality gate cho nhánh khối. Mẫu 2D cũ được xem là ví dụ âm `none` cho đầu 3D khi huấn luyện; nhãn 2D không được xuất ra hoặc thống kê trong ứng dụng. Ảnh được cắt/đưa về kích thước chuẩn; khi train có tăng cường xoay, tịnh tiến, lật và thay đổi độ sáng/độ tương phản. Tập validation được tách tự động theo ảnh và có cân bằng trọng số lớp. Cài PyTorch một lần trong virtual environment rồi train:
+Checkpoint hiện có hai đầu ra để giữ tương thích cấu trúc với model cũ; ứng dụng chỉ sử dụng đầu 3D (`sphere`, `cylinder`, `cone`, `box`, `hexagonal_prism`), bỏ qua hoàn toàn đầu 2D và từ chối checkpoint không đạt quality gate cho nhánh khối. Mẫu 2D cũ được xem là ví dụ âm `none` cho đầu 3D khi huấn luyện; nhãn 2D không được xuất ra hoặc thống kê trong ứng dụng. Ảnh được cắt/đưa về kích thước chuẩn; khi train có tăng cường xoay, tịnh tiến, lật và thay đổi độ sáng/độ tương phản. Tập validation được tách tự động theo ảnh và có cân bằng trọng số lớp. Cài PyTorch một lần trong virtual environment rồi train:
 
 ```powershell
 .venv\Scripts\python.exe -m pip install -e ".[neural]"
@@ -103,11 +103,11 @@ Có thể đổi đường dẫn database, checkpoint, số epoch hoặc seed:
 .venv\Scripts\python.exe -m visual_system.train_shapes --epochs 80 --seed 42 --output data/models/shape_net.pt
 ```
 
-Mỗi epoch in `train_loss`, `validation_loss`, độ chính xác và precision/recall theo từng lớp của các đầu tương thích 2D/3D. Cuối đợt train, checkpoint tốt nhất theo macro recall validation được lưu tại đường dẫn `--output` (mặc định `data/models/shape_net.pt`), kèm lịch sử, số mẫu và báo cáo chất lượng. Chỉ nhánh 3D đạt đủ mẫu train/validation và precision, recall, accuracy ít nhất 85% mới được ứng dụng nạp; nhánh 2D luôn bị bỏ qua. API tự nạp checkpoint hợp lệ; model không train lại mỗi lần chạy. Sau khi thêm ảnh mới, cần chạy lệnh train lại. Nếu train lỗi trước khi hoàn tất, checkpoint đích chưa được cập nhật.
+Mỗi epoch in `train_loss`, `validation_loss`, độ chính xác và precision/recall theo từng lớp của các đầu tương thích 2D/3D. Cuối đợt train, checkpoint tốt nhất theo macro recall validation được lưu tại đường dẫn `--output` (mặc định `data/models/shape_net.pt`), kèm lịch sử, số mẫu và báo cáo chất lượng. Chỉ nhánh 3D đạt đủ mẫu train/validation và precision, recall, accuracy ít nhất 70% mới được ứng dụng nạp; nhánh 2D luôn bị bỏ qua. API tự nạp checkpoint hợp lệ; model không train lại mỗi lần chạy. Sau khi thêm ảnh mới, cần chạy lệnh train lại. Nếu train lỗi trước khi hoàn tất, checkpoint đích chưa được cập nhật.
 
 Neural chỉ thay nhãn heuristic khi confidence đạt 0.85 và nhánh 3D vượt quality gate trong validation. Khi chưa cài PyTorch hoặc chưa có checkpoint đạt gate, API tiếp tục chạy heuristic khối 3D. Nếu checkpoint không đạt yêu cầu, báo cáo cuối lệnh train chỉ rõ lớp còn thiếu mẫu hoặc độ chính xác thấp; hãy bổ sung/kiểm tra nhãn và train lại thay vì chỉ tăng epoch.
 
-Checkpoint trước phiên bản gộp nhãn không được nạp vì bộ nhãn khối đã thay đổi. Sau khi cập nhật mã, cần train lại để tạo checkpoint tương thích; nếu chưa đủ dữ liệu cho một nhánh, nhánh đó sẽ tiếp tục dùng heuristic.
+Checkpoint cũ không được nạp vì bộ nhãn khối đã thay đổi. Sau khi cập nhật mã, cần train lại để tạo checkpoint tương thích; nếu chưa đủ dữ liệu cho một lớp, checkpoint sẽ không qua gate.
 
 ### Đánh giá độ chính xác
 

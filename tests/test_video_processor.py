@@ -227,6 +227,7 @@ def test_shape_names_distinguish_solid_types() -> None:
         "box": "KHOI HOP",
         "sphere": "KHOI CAU",
         "cylinder": "KHOI TRU",
+        "hexagonal_prism": "LANG TRU LUC GIAC",
         "cone": "KHOI NON",
     }
 

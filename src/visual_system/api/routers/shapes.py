@@ -27,7 +27,10 @@ async def add_shape_sample(
     if normalized_label not in SOLID_SHAPE_LABELS:
         raise HTTPException(
             status_code=400,
-            detail="Chỉ hỗ trợ nhãn khối 3D: sphere, cylinder, cone, box",
+            detail=(
+                "Chỉ hỗ trợ nhãn khối 3D: sphere, cylinder, cone, box, "
+                "hexagonal_prism"
+            ),
         )
 
     if not files:

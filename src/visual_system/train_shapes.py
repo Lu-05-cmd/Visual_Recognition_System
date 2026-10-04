@@ -107,6 +107,42 @@ def _classification_metrics(confusion: Counter, classes: tuple[str, ...]) -> dic
     }
 
 
+def _print_solid_metrics_table(
+    sample_counts: dict,
+    metrics: dict,
+    deployment_report: dict,
+) -> None:
+    solid_metrics = metrics["solid_classes"]
+    solid_report = deployment_report["heads"]["solid"]
+    outline_count = sum(sample_counts.get(label, 0) for label in OUTLINE_CLASSES)
+
+    print("\nBest checkpoint: solid-head validation by class")
+    print(
+        f"{'Class':<10} | {'Train':>5} | {'Val':>5} | {'Precision':>9} | "
+        f"{'Recall':>7} | {'Gate':>4}"
+    )
+    print("-" * 61)
+    for label in SOLID_CLASSES:
+        total = outline_count if label == "none" else sample_counts.get(label, 0)
+        validation_count = solid_metrics[label]["count"]
+        train_count = max(total - validation_count, 0)
+        class_failures = [
+            item for item in solid_report["failures"] if item.startswith(f"{label}:")
+        ]
+        gate = "PASS" if not class_failures else "FAIL"
+        item = solid_metrics[label]
+        print(
+            f"{label:<10} | {train_count:>5} | {validation_count:>5} | "
+            f"{item['precision']:>8.1%} | {item['recall']:>6.1%} | {gate:>4}"
+        )
+    overall_gate = "PASS" if solid_report["deployable"] else "FAIL"
+    print("-" * 61)
+    print(
+        f"Solid accuracy: {metrics['solid_accuracy']:.1%} "
+        f"(required {MIN_DEPLOYMENT_ACCURACY:.0%}) | Deployment gate: {overall_gate}"
+    )
+
+
 def _deployment_report(train_counts: dict, validation_metrics: dict) -> dict:
     outline_counts = {
         label: train_counts.get(label, 0) for label in OUTLINE_CLASSES
@@ -171,6 +207,7 @@ def train(
     np.random.seed(seed)
     torch.manual_seed(seed)
     train_samples, validation_samples, counts = load_samples(database, validation_fraction, seed)
+    train_counts = Counter(label for label, _ in train_samples)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model_type().to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
@@ -341,7 +378,7 @@ def train(
         "history": history,
     }
     report = _deployment_report(
-        counts,
+        train_counts,
         {
             "outline": {
                 "accuracy": best_metrics["outline_accuracy"],
@@ -372,6 +409,7 @@ def train(
             ensure_ascii=False,
         )
     )
+    _print_solid_metrics_table(counts, best_metrics, report)
 
 
 def main() -> None:

@@ -333,6 +333,7 @@ class VideoProcessor:
             "sphere": "KHOI CAU",
             "cylinder": "KHOI TRU",
             "cone": "KHOI NON",
+            "hexagonal_prism": "LANG TRU LUC GIAC",
         }
         solid_name = solid_names.get(detection.solid_shape)
         if not solid_name:

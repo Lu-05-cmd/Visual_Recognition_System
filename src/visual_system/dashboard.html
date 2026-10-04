@@ -238,6 +238,15 @@
     .metric span { color: var(--muted); overflow-wrap: anywhere; }
     .metric strong { flex: none; font-size: 18px; }
     .metric-wide { grid-column: 1 / -1; align-items: flex-start; }
+    .shape-tab-list {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .shape-tab-button { min-width: 0; flex: 1; }
+    .shape-tab-panel[hidden] { display: none; }
+    .shape-tab-panel > .section-note { margin: 0 0 14px; }
     .shape-groups {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -319,6 +328,7 @@
       .tab-button { min-width: 0; padding-inline: 8px; }
       .panel { padding: 16px; }
       .summary { gap: 0 12px; }
+      .shape-tab-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
 
     @media (max-width: 420px) {
@@ -390,10 +400,24 @@
         <div class="toolbar">
           <div>
             <h2 id="shape-library-heading">Bổ sung mẫu hình dạng</h2>
-            <p class="section-note">Chỉ bổ sung ảnh mẫu khối 3D: cầu, trụ, nón và hộp.</p>
           </div>
         </div>
-          <span id="shape-library-status" class="status shape-library-status" aria-live="polite">Đang tải kho mẫu...</span>
+        <span id="shape-library-status" class="status shape-library-status" aria-live="polite">Đang tải kho mẫu...</span>
+        <div class="shape-tab-list" role="tablist" aria-label="Loại hình dạng">
+          <button id="shape-2d-tab" class="tab-button shape-tab-button" type="button" role="tab"
+            aria-selected="false" aria-controls="shape-2d-panel" onclick="selectShapeTab('2d')">Hình dạng 2D</button>
+          <button id="shape-3d-tab" class="tab-button shape-tab-button" type="button" role="tab"
+            aria-selected="true" aria-controls="shape-3d-panel" onclick="selectShapeTab('3d')">Khối 3D</button>
+        </div>
+        <section id="shape-2d-panel" class="shape-tab-panel" role="tabpanel"
+          aria-labelledby="shape-2d-tab" hidden>
+          <p class="section-note">Ảnh mẫu đường viền 2D cũ chỉ có thể xem và xóa; hiện chưa hỗ trợ thêm mẫu 2D.</p>
+          <p id="shape-library-empty-2d" class="section-note" hidden>Chưa có ảnh mẫu 2D cũ trong kho.</p>
+          <div id="shape-library-groups-2d" class="shape-groups" aria-live="polite"></div>
+        </section>
+        <section id="shape-3d-panel" class="shape-tab-panel" role="tabpanel"
+          aria-labelledby="shape-3d-tab">
+          <p class="section-note">Thêm và quản lý ảnh mẫu khối 3D.</p>
           <form id="shape-sample-form" onsubmit="addShapeSample(event)">
             <div class="field">
               <label for="shape-sample-label">Tên hình dạng</label>
@@ -403,6 +427,7 @@
                 <option value="cylinder">Hình trụ</option>
                 <option value="cone">Khối nón</option>
                 <option value="box">Khối hộp</option>
+                <option value="hexagonal_prism">Lăng trụ lục giác</option>
               </select>
             </div>
             <div class="field">
@@ -413,7 +438,9 @@
               <button type="submit">Thêm mẫu vào kho</button>
             </div>
           </form>
-          <div id="shape-library-groups" class="shape-groups" aria-live="polite"></div>
+          <p id="shape-library-empty-3d" class="section-note" hidden>Chưa có ảnh mẫu 3D trong kho.</p>
+          <div id="shape-library-groups-3d" class="shape-groups" aria-live="polite"></div>
+        </section>
       </section>
     </main>
   </div>
@@ -426,9 +453,33 @@
       circle: 'hình tròn', oval: 'hình oval', triangle: 'tam giác', rectangle: 'hình chữ nhật',
       square: 'hình vuông', pentagon: 'ngũ giác', hexagon: 'lục giác', polygon: 'đa giác',
       sphere: 'khối cầu', cylinder: 'hình trụ', cone: 'khối nón', box: 'khối hộp',
+      hexagonal_prism: 'lăng trụ lục giác',
       cube: 'khối hộp', cuboid: 'khối hộp',
       unknown: 'chưa rõ',
     };
+    const outlineShapeLabels = new Set([
+      'circle', 'oval', 'triangle', 'rectangle', 'square', 'pentagon', 'hexagon', 'polygon'
+    ]);
+    const solidShapeLabels = new Set([
+      'sphere', 'cylinder', 'cone', 'box', 'hexagonal_prism'
+    ]);
+
+    function selectShapeTab(dimension) {
+      const is2d = dimension === '2d';
+      document.getElementById('shape-2d-tab').setAttribute('aria-selected', String(is2d));
+      document.getElementById('shape-3d-tab').setAttribute('aria-selected', String(!is2d));
+      document.getElementById('shape-2d-panel').hidden = !is2d;
+      document.getElementById('shape-3d-panel').hidden = is2d;
+    }
+
+    function updateShapeLabelCounts(classes) {
+      const labelSelect = document.getElementById('shape-sample-label');
+      for (const option of labelSelect.options) {
+        if (!option.value) continue;
+        const count = Number(classes[option.value] || 0);
+        option.textContent = `${shapeNames[option.value] || option.value} · ${count} ảnh`;
+      }
+    }
 
     function selectTab(tab) {
       const videoSelected = tab === 'video';
@@ -556,15 +607,26 @@
 
     async function loadShapeLibrary() {
       const status = document.getElementById('shape-library-status');
-      const groups = document.getElementById('shape-library-groups');
+      const groups2d = document.getElementById('shape-library-groups-2d');
+      const groups3d = document.getElementById('shape-library-groups-3d');
+      const empty2d = document.getElementById('shape-library-empty-2d');
+      const empty3d = document.getElementById('shape-library-empty-3d');
       try {
         const response = await fetch('/api/shapes/library');
         if (!response.ok) throw new Error('library unavailable');
         const library = await response.json();
         window.shapeLibraryLoaded = true;
+        updateShapeLabelCounts(library.classes);
         status.textContent = `${library.sample_count} mẫu trong ${Object.keys(library.classes).length} nhóm`;
-        groups.replaceChildren();
+        groups2d.replaceChildren();
+        groups3d.replaceChildren();
         for (const [label, samples] of Object.entries(library.groups)) {
+          const groups = outlineShapeLabels.has(label)
+            ? groups2d
+            : solidShapeLabels.has(label)
+              ? groups3d
+              : null;
+          if (!groups) continue;
           const group = document.createElement('section');
           group.className = 'shape-group';
           const header = document.createElement('div');
@@ -603,6 +665,8 @@
           group.append(header, gallery);
           groups.append(group);
         }
+        empty2d.hidden = groups2d.childElementCount > 0;
+        empty3d.hidden = groups3d.childElementCount > 0;
         if (library.sample_count === 0) status.textContent = 'Kho mẫu đang trống';
       } catch (error) {
         window.shapeLibraryLoaded = false;
