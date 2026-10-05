@@ -2,9 +2,12 @@ from collections import Counter
 
 import cv2
 import numpy as np
+import pytest
 
+from tests.shape_synthetic import make_scene
 from visual_system.models import BoundingBox, Detection, FrameResult, InspectionStatus
 from visual_system.services import video_processor as video_processor_module
+from visual_system.services.shape_library import ShapeFeatureLibrary
 from visual_system.services.video_processor import VideoProcessor
 
 
@@ -85,8 +88,53 @@ def test_video_summary_does_not_count_solid_projections_as_flat_shapes(
     summary = VideoProcessor(100, 80.0, 10).process(input_path, output_path)
 
     assert summary.unique_solid_shapes == {"sphere": 1, "box": 1}
-    assert summary.unique_outline_shapes == {}
+    assert summary.unique_outline_shapes == {"circle": 1, "square": 1}
     assert summary.unique_shapes == {"sphere": 1, "box": 1}
+
+
+def test_video_summary_uses_latest_stable_color_for_each_track(tmp_path, monkeypatch) -> None:
+    input_path = tmp_path / "color-change.mp4"
+    output_path = tmp_path / "color-change-annotated.mp4"
+    writer = cv2.VideoWriter(
+        str(input_path),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        10.0,
+        (80, 60),
+    )
+    for index in range(5):
+        frame = np.zeros((60, 80, 3), dtype=np.uint8)
+        cv2.circle(frame, (10 + index * 5, 30), 3, (255, 255, 255), -1)
+        writer.write(frame)
+    writer.release()
+
+    class ChangingColorPipeline:
+        def __init__(self, *args, **kwargs) -> None:
+            self.frame_id = 0
+
+        def process(self, frame: np.ndarray):
+            colors = ("yellow", "orange", "yellow", "orange", "orange")
+            color = colors[self.frame_id]
+            self.frame_id += 1
+            detection = Detection(
+                "product",
+                0.95,
+                BoundingBox(20, 10, 30, 30),
+                color=color,
+                track_id=1,
+                inspection=InspectionStatus.PASS,
+            )
+            return FrameResult(
+                self.frame_id,
+                frame.shape[1],
+                frame.shape[0],
+                [detection],
+            )
+
+    monkeypatch.setattr(video_processor_module, "VisionPipeline", ChangingColorPipeline)
+
+    summary = VideoProcessor(100, 80.0, 10).process(input_path, output_path)
+
+    assert summary.unique_colors == {"orange": 1}
 
 
 def test_video_processor_passes_neural_checkpoint_to_frame_pipeline(
@@ -175,10 +223,75 @@ def test_video_processor_skips_repeated_frames_without_splitting_track(tmp_path)
     summary = VideoProcessor(100, 80.0, 10).process(input_path, output_path)
 
     assert summary.processed_frames == 24
-    assert summary.duplicate_frames_skipped >= 3
+    assert summary.duplicate_frames_skipped == 4
     assert summary.unique_tracks == 1
     assert summary.total_detections == 1
     assert summary.frame_detections < summary.processed_frames
+
+
+def test_video_processor_confirms_shape_across_skipped_duplicate_frames(tmp_path) -> None:
+    input_path = tmp_path / "repeated-prism.mp4"
+    output_path = tmp_path / "repeated-prism-annotated.mp4"
+    frame = make_scene("hexagonal_prism", seed=0)
+    height, width = frame.shape[:2]
+    writer = cv2.VideoWriter(
+        str(input_path),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        10.0,
+        (width, height),
+    )
+    for _ in range(8):
+        writer.write(frame)
+    writer.release()
+
+    summary = VideoProcessor(120, 80.0, 10).process(input_path, output_path)
+
+    assert summary.duplicate_frames_skipped >= 5
+    assert summary.unique_solid_shapes == {"hexagonal_prism": 1}
+
+
+@pytest.mark.parametrize(
+    ("shape", "expected_label"),
+    [
+        ("box", "box"),
+        ("hexagonal_prism", "hexagonal_prism"),
+        ("square", "box"),
+        ("hexagon", "hexagonal_prism"),
+    ],
+)
+def test_video_processor_preserves_box_and_prism_labels_with_library(
+    tmp_path,
+    shape: str,
+    expected_label: str,
+) -> None:
+    library_path = tmp_path / "shape-library.sqlite3"
+    library = ShapeFeatureLibrary(library_path)
+    for label in ("box", "hexagonal_prism"):
+        for seed in range(4):
+            library.add_image(make_scene(label, seed), label)
+
+    frame = make_scene(shape, seed=7)
+    height, width = frame.shape[:2]
+    input_path = tmp_path / f"{shape}-input.mp4"
+    output_path = tmp_path / f"{shape}-annotated.mp4"
+    writer = cv2.VideoWriter(
+        str(input_path),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        10.0,
+        (width, height),
+    )
+    for _ in range(8):
+        writer.write(frame)
+    writer.release()
+
+    summary = VideoProcessor(
+        120,
+        80.0,
+        10,
+        shape_library_path=library_path,
+    ).process(input_path, output_path)
+
+    assert summary.unique_solid_shapes == {expected_label: 1}
 
 
 def test_annotations_stay_inside_frame_for_objects_at_edges() -> None:
@@ -224,7 +337,7 @@ def test_status_panel_text_contrast_is_independent_from_pass_color() -> None:
 
 def test_shape_names_distinguish_solid_types() -> None:
     expected_names = {
-        "box": "KHOI HOP",
+        "box": "KHOI VUONG",
         "sphere": "KHOI CAU",
         "cylinder": "KHOI TRU",
         "hexagonal_prism": "LANG TRU LUC GIAC",
@@ -258,10 +371,10 @@ def test_annotation_font_scales_for_high_resolution_frames() -> None:
     small_label = np.zeros((360, 640, 3), dtype=np.uint8)
     large_label = np.zeros((1080, 1920, 3), dtype=np.uint8)
     VideoProcessor._draw_label(
-        small_label, ("KHOI HOP",), 30, 120, 90, (255, 150, 40), (0, 0, 255)
+        small_label, ("KHOI VUONG",), 30, 120, 90, (255, 150, 40), (0, 0, 255)
     )
     VideoProcessor._draw_label(
-        large_label, ("KHOI HOP",), 30, 120, 250, (255, 150, 40), (0, 0, 255)
+        large_label, ("KHOI VUONG",), 30, 120, 250, (255, 150, 40), (0, 0, 255)
     )
     small_height = np.count_nonzero(np.any(small_label[:120, 30:280] != 0, axis=2))
     large_height = np.count_nonzero(np.any(large_label[:120, 30:280] != 0, axis=2))
@@ -280,7 +393,7 @@ def test_solid_annotation_does_not_display_conflicting_outline() -> None:
     assert VideoProcessor._shape_name(detection) == "KHOI CAU"
 
 
-def test_legacy_2d_outline_is_not_displayed_as_a_shape() -> None:
+def test_outline_is_not_displayed_when_no_3d_shape_is_available() -> None:
     detection = Detection(
         label="product",
         confidence=0.95,
@@ -289,6 +402,29 @@ def test_legacy_2d_outline_is_not_displayed_as_a_shape() -> None:
     )
 
     assert VideoProcessor._shape_name(detection) == "CHUA RO"
+
+
+def test_square_outline_is_not_substituted_for_cube_label() -> None:
+    detection = Detection(
+        label="product",
+        confidence=0.95,
+        bounding_box=BoundingBox(0, 0, 50, 50),
+        shape="square",
+    )
+
+    assert VideoProcessor._shape_name(detection) == "CHUA RO"
+
+
+def test_cube_annotation_uses_three_dimensional_name() -> None:
+    detection = Detection(
+        label="product",
+        confidence=0.95,
+        bounding_box=BoundingBox(0, 0, 50, 50),
+        shape="square",
+        solid_shape="box",
+    )
+
+    assert VideoProcessor._shape_name(detection) == "KHOI VUONG"
 
 
 def test_shape_serial_is_above_color_and_inspection_labels() -> None:

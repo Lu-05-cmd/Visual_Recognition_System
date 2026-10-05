@@ -3,24 +3,47 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-
-FLAT_SHAPES = ("circle", "oval", "triangle", "square", "rectangle", "pentagon", "hexagon")
-SOLID_SHAPES = ("sphere", "cylinder", "cone", "box")
+FLAT_SHAPES = (
+    "circle",
+    "oval",
+    "triangle",
+    "square",
+    "rectangle",
+    "pentagon",
+    "hexagon",
+)
+SOLID_SHAPES = ("sphere", "cylinder", "cone", "box", "hexagonal_prism")
 
 
 def _polygon(name: str, center: tuple[int, int], radius: int) -> np.ndarray:
     x, y = center
     if name in {"triangle", "cone"}:
-        points = [(x, y - radius), (x + radius, y + radius), (x - radius, y + radius)]
+        points = [
+            (x, y - radius),
+            (x + radius, y + radius),
+            (x - radius, y + radius),
+        ]
     elif name == "square":
-        points = [(x-radius, y-radius), (x+radius, y-radius), (x+radius, y+radius), (x-radius, y+radius)]
+        points = [
+            (x - radius, y - radius),
+            (x + radius, y - radius),
+            (x + radius, y + radius),
+            (x - radius, y + radius),
+        ]
     elif name == "rectangle":
-        points = [(x-radius, y-radius//2), (x+radius, y-radius//2), (x+radius, y+radius//2), (x-radius, y+radius//2)]
+        points = [
+            (x - radius, y - radius // 2),
+            (x + radius, y - radius // 2),
+            (x + radius, y + radius // 2),
+            (x - radius, y + radius // 2),
+        ]
     else:
         count = 5 if name == "pentagon" else 6
         points = [
-            (round(x + radius * np.cos(2 * np.pi * i / count - np.pi / 2)),
-             round(y + radius * np.sin(2 * np.pi * i / count - np.pi / 2)))
+            (
+                round(x + radius * np.cos(2 * np.pi * i / count - np.pi / 2)),
+                round(y + radius * np.sin(2 * np.pi * i / count - np.pi / 2)),
+            )
             for i in range(count)
         ]
     return np.asarray(points, dtype=np.int32)
@@ -52,7 +75,17 @@ def make_scene(
         angle = (seed % 8) * 11.25
         if name in {"circle", "oval"}:
             axes = (radius, radius) if name == "circle" else (radius, max(12, radius // 2))
-            cv2.ellipse(object_mask, (cx, cy), axes, angle, 0, 360, 255, -1, cv2.LINE_AA)
+            cv2.ellipse(
+                object_mask,
+                (cx, cy),
+                axes,
+                angle,
+                0,
+                360,
+                255,
+                -1,
+                cv2.LINE_AA,
+            )
         else:
             points = _polygon(name, (cx, cy), radius).astype(np.float32)
             rotation = cv2.getRotationMatrix2D((cx, cy), angle, 1.0)
@@ -62,20 +95,61 @@ def make_scene(
     elif name == "sphere":
         cv2.circle(object_mask, (cx, cy), radius, 255, -1, cv2.LINE_AA)
         yy, xx = np.mgrid[:height, :width]
-        radial = np.sqrt((xx-cx)**2 + (yy-cy)**2) / max(radius, 1)
-        light = np.clip(1.2 - 0.55 * radial + 0.12 * (cx-xx) / max(radius, 1), 0.45, 1.35)
-        object_layer = np.clip(base[None, None, :] * light[:, :, None], 0, 255).astype(np.uint8)
+        radial = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) / max(radius, 1)
+        light = np.clip(
+            1.2 - 0.55 * radial + 0.12 * (cx - xx) / max(radius, 1),
+            0.45,
+            1.35,
+        )
+        object_layer = np.clip(
+            base[None, None, :] * light[:, :, None],
+            0,
+            255,
+        ).astype(np.uint8)
     elif name == "cylinder":
         body_w, body_h = int(radius * 1.35), int(radius * 1.55)
-        cv2.rectangle(object_mask, (cx-body_w//2, cy-body_h//2), (cx+body_w//2, cy+body_h//2), 255, -1)
-        cv2.ellipse(object_mask, (cx, cy-body_h//2), (body_w//2, max(8, radius//4)), 0, 0, 360, 255, -1)
-        cv2.ellipse(object_mask, (cx, cy+body_h//2), (body_w//2, max(8, radius//4)), 0, 0, 360, 255, -1)
+        cv2.rectangle(
+            object_mask,
+            (cx - body_w // 2, cy - body_h // 2),
+            (cx + body_w // 2, cy + body_h // 2),
+            255,
+            -1,
+        )
+        cv2.ellipse(
+            object_mask,
+            (cx, cy - body_h // 2),
+            (body_w // 2, max(8, radius // 4)),
+            0,
+            0,
+            360,
+            255,
+            -1,
+        )
+        cv2.ellipse(
+            object_mask,
+            (cx, cy + body_h // 2),
+            (body_w // 2, max(8, radius // 4)),
+            0,
+            0,
+            360,
+            255,
+            -1,
+        )
         object_layer[:] = base
-        cv2.ellipse(object_layer, (cx, cy-body_h//2), (body_w//2, max(8, radius//4)), 0, 0, 360, (168, 106, 60), -1)
         cv2.ellipse(
             object_layer,
-            (cx, cy-body_h//2),
-            (body_w//2, max(8, radius//4)),
+            (cx, cy - body_h // 2),
+            (body_w // 2, max(8, radius // 4)),
+            0,
+            0,
+            360,
+            (168, 106, 60),
+            -1,
+        )
+        cv2.ellipse(
+            object_layer,
+            (cx, cy - body_h // 2),
+            (body_w // 2, max(8, radius // 4)),
             0,
             0,
             360,
@@ -86,7 +160,7 @@ def make_scene(
         points = _polygon(name, (cx, cy), radius)
         cv2.fillPoly(object_mask, [points], 255, cv2.LINE_AA)
         object_layer[:] = 0
-        for row in range(max(0, cy-radius), min(height, cy+radius+1)):
+        for row in range(max(0, cy - radius), min(height, cy + radius + 1)):
             columns = np.flatnonzero(object_mask[row] > 0)
             if not len(columns):
                 continue
@@ -96,24 +170,105 @@ def make_scene(
             light = np.clip(1.18 - 0.55 * edge_distance, 0.5, 1.2)
             object_layer[row, columns] = np.clip(base[None, :] * light[:, None], 0, 255)
     elif name == "box":
-        top = np.asarray([(cx, cy-radius), (cx+radius, cy-radius//2), (cx, cy), (cx-radius, cy-radius//2)], np.int32)
-        left = np.asarray([(cx-radius, cy-radius//2), (cx, cy), (cx, cy+radius), (cx-radius, cy+radius//2)], np.int32)
-        right = np.asarray([(cx, cy), (cx+radius, cy-radius//2), (cx+radius, cy+radius//2), (cx, cy+radius)], np.int32)
-        silhouette = np.asarray([(cx, cy-radius), (cx+radius, cy-radius//2), (cx+radius, cy+radius//2), (cx, cy+radius), (cx-radius, cy+radius//2), (cx-radius, cy-radius//2)], np.int32)
+        top = np.asarray(
+            [
+                (cx, cy - radius),
+                (cx + radius, cy - radius // 2),
+                (cx, cy),
+                (cx - radius, cy - radius // 2),
+            ],
+            np.int32,
+        )
+        left = np.asarray(
+            [
+                (cx - radius, cy - radius // 2),
+                (cx, cy),
+                (cx, cy + radius),
+                (cx - radius, cy + radius // 2),
+            ],
+            np.int32,
+        )
+        right = np.asarray(
+            [
+                (cx, cy),
+                (cx + radius, cy - radius // 2),
+                (cx + radius, cy + radius // 2),
+                (cx, cy + radius),
+            ],
+            np.int32,
+        )
+        silhouette = np.asarray(
+            [
+                (cx, cy - radius),
+                (cx + radius, cy - radius // 2),
+                (cx + radius, cy + radius // 2),
+                (cx, cy + radius),
+                (cx - radius, cy + radius // 2),
+                (cx - radius, cy - radius // 2),
+            ],
+            np.int32,
+        )
         cv2.fillPoly(object_mask, [silhouette], 255, cv2.LINE_AA)
         cv2.fillPoly(object_layer, [top], (170, 118, 72), cv2.LINE_AA)
         cv2.fillPoly(object_layer, [left], (140, 82, 40), cv2.LINE_AA)
         cv2.fillPoly(object_layer, [right], (82, 49, 26), cv2.LINE_AA)
+    elif name == "hexagonal_prism":
+        front_center = (cx + radius // 3, cy)
+        back_center = (cx - radius // 3, cy - radius // 3)
+        angles = np.arange(6) * np.pi / 3
+        front = np.asarray(
+            [
+                (
+                    round(front_center[0] + radius * np.cos(angle)),
+                    round(front_center[1] + radius * np.sin(angle)),
+                )
+                for angle in angles
+            ],
+            dtype=np.int32,
+        )
+        back = np.asarray(
+            [
+                (
+                    round(back_center[0] + radius * np.cos(angle)),
+                    round(back_center[1] + radius * np.sin(angle)),
+                )
+                for angle in angles
+            ],
+            dtype=np.int32,
+        )
+        face_colors = (
+            (170, 118, 72),
+            (150, 98, 54),
+            (120, 72, 38),
+            (88, 54, 30),
+            (112, 67, 36),
+            (142, 84, 42),
+        )
+        for index in range(6):
+            next_index = (index + 1) % 6
+            face = np.asarray(
+                [back[index], back[next_index], front[next_index], front[index]],
+                dtype=np.int32,
+            )
+            cv2.fillPoly(object_mask, [face], 255, cv2.LINE_AA)
+            cv2.fillPoly(object_layer, [face], face_colors[index], cv2.LINE_AA)
+        cv2.fillPoly(object_mask, [front], 255, cv2.LINE_AA)
+        cv2.fillPoly(object_layer, [front], (155, 95, 52), cv2.LINE_AA)
 
     alpha = object_mask.astype(np.float32)[:, :, None] / 255
-    scene = (scene * (1-alpha) + object_layer * alpha).astype(np.uint8)
+    scene = (scene * (1 - alpha) + object_layer * alpha).astype(np.uint8)
     brightness = 0.82 + (seed % 5) * 0.08
     scene = np.clip(scene.astype(np.float32) * brightness, 0, 255).astype(np.uint8)
     noise = rng.normal(0, 1.5 + seed % 3, scene.shape).astype(np.float32)
     return np.clip(scene.astype(np.float32) + noise, 0, 255).astype(np.uint8)
 
 
-def scene_box(name: str, seed: int, width: int = 320, height: int = 240) -> tuple[int, int, int, int]:
+def scene_box(
+    name: str,
+    seed: int,
+    width: int = 320,
+    height: int = 240,
+) -> tuple[int, int, int, int]:
     cx = int(width * (0.35 + 0.3 * ((seed * 7) % 11) / 10))
     cy = int(height * (0.35 + 0.3 * ((seed * 5) % 11) / 10))
     radius = int(min(width, height) * (0.16 + 0.04 * (seed % 4)))

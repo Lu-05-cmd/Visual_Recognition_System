@@ -25,11 +25,11 @@ class ShapeRecognizer:
         detections: list[Detection],
     ) -> list[Detection]:
         for detection in detections:
-            detection.shape = "unknown"
             box = detection.bounding_box
             crop = frame[box.y : box.y + box.height, box.x : box.x + box.width]
             extracted = self._extract_contour(crop, detection.color)
             truncated = self._detection_is_truncated(frame.shape, box, extracted)
+            detection.shape = "unknown"
             heuristic_shape = (
                 "unknown"
                 if truncated
@@ -51,28 +51,63 @@ class ShapeRecognizer:
                     and solid_confidence >= self.neural_model.confidence_threshold
                 ):
                     neural_shape = neural_solid
+            box_like_contour = (
+                heuristic_shape == "box"
+                and extracted is not None
+                and 4
+                <= len(
+                    cv2.approxPolyDP(
+                        extracted[1],
+                        0.04 * cv2.arcLength(extracted[1], True),
+                        True,
+                    )
+                )
+                <= 8
+            )
             library_shape = None
             if (
                 self.shape_library
                 and extracted
                 and not truncated
-                and heuristic_shape == "unknown"
+                and (heuristic_shape == "unknown" or box_like_contour)
             ):
-                library_shape = self.shape_library.classify(
+                candidate_shape = self.shape_library.classify(
                     extracted,
                     labels={"sphere", "cylinder", "cone", "box", "hexagonal_prism"},
                 )
-                if not library_shape:
-                    library_shape = self.shape_library.classify_relaxed(
+                if not candidate_shape:
+                    candidate_shape = self.shape_library.classify_relaxed(
                         extracted,
                         labels={"sphere", "cylinder", "cone", "box", "hexagonal_prism"},
                         relaxed_threshold=0.40,
                     )
-                if library_shape and self._is_flat_silhouette_only(extracted):
-                    library_shape = None
-            detection.solid_shape = (
-                neural_shape or library_shape or heuristic_shape
-            )
+                if candidate_shape and not self._is_flat_silhouette_only(extracted, crop):
+                    if not box_like_contour:
+                        library_shape = candidate_shape
+                    elif candidate_shape == "box":
+                        library_shape = candidate_shape
+                    elif candidate_shape == "hexagonal_prism":
+                        _, _, contour_width, contour_height = cv2.boundingRect(
+                            extracted[1]
+                        )
+                        aspect_ratio = max(contour_width, contour_height) / max(
+                            min(contour_width, contour_height),
+                            1,
+                        )
+                        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+                        object_mask = np.zeros(extracted[0].shape, dtype=np.uint8)
+                        cv2.drawContours(object_mask, [extracted[1]], -1, 255, -1)
+                        if aspect_ratio >= 1.08 or self._has_hexagonal_prism_facets(
+                            gray,
+                            object_mask,
+                            contour_width,
+                            contour_height,
+                        ):
+                            library_shape = candidate_shape
+            if box_like_contour and library_shape:
+                detection.solid_shape = library_shape
+            else:
+                detection.solid_shape = neural_shape or library_shape or heuristic_shape
         confirmed_boxes = [
             detection
             for detection in detections
@@ -90,22 +125,25 @@ class ShapeRecognizer:
         return detections
 
     @staticmethod
-    def _is_flat_silhouette_only(extracted) -> bool:
-        """Reject 3D labels from flat, uniformly-colored silhouettes."""
+    def _is_flat_silhouette_only(extracted, crop: np.ndarray) -> bool:
+        """Reject library labels when the object has no internal depth edges."""
         mask, contour = extracted
         object_mask = np.zeros(mask.shape, dtype=np.uint8)
         cv2.drawContours(object_mask, [contour], -1, 255, -1)
-        # Plain crop is not available here; estimate from mask and contour bounds
-        gray_estimate = cv2.Canny(mask, 50, 150)
-        object_pixels = cv2.countNonZero(object_mask)
-        edge_pixels = cv2.countNonZero(
-            cv2.bitwise_and(gray_estimate, object_mask)
+        interior = cv2.erode(
+            object_mask,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
         )
-        if object_pixels < 10:
+        interior_pixels = cv2.countNonZero(interior)
+        if interior_pixels < 10:
             return True
-        # High edge density inside a small object suggests internal detail (shading, facets).
-        edge_ratio = edge_pixels / max(object_pixels, 1)
-        return edge_ratio < 0.05
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        internal_edges = cv2.bitwise_and(
+            cv2.Canny(gray, 45, 130),
+            interior,
+        )
+        edge_ratio = cv2.countNonZero(internal_edges) / interior_pixels
+        return edge_ratio < 0.005
 
 
     @staticmethod
@@ -230,13 +268,17 @@ class ShapeRecognizer:
         has_cylinder_rim = cls._has_horizontal_rim(gray, object_mask, width, height)
         has_rounded_ends = cls._has_rounded_cylinder_ends(contour, width, height)
 
-        # Uniformly colored silhouettes do not provide depth evidence. Avoid
-        # labeling a flat square as a cube from its four contour vertices.
+        # Keep square and hexagonal silhouettes available for their explicit
+        # solid-label mappings even when the object has uniform color.
         if (
             color_spread < 2
             and not has_elliptical_rim
             and not (aspect_ratio >= 1.3 and vertex_count >= 5)
         ):
+            if outline_shape == "square":
+                return "box"
+            if outline_shape == "hexagon":
+                return "hexagonal_prism"
             return "unknown"
 
         sphere_like_outline = (
@@ -245,13 +287,27 @@ class ShapeRecognizer:
             and ellipse_roundness <= 0.16
             and not has_internal_facets
         )
+        has_radial_shading = cls._has_radial_shading(
+            gray,
+            object_mask,
+            cv2.boundingRect(contour),
+        )
+        # A rim is a stronger cylinder cue than an oval outer contour is a
+        # sphere cue; test it first to avoid confusing short cylinders for spheres.
+        if aspect_ratio >= 1.15 and (
+            has_elliptical_rim
+            or has_cylinder_rim
+            or (has_rounded_ends and has_shading and not has_internal_facets)
+        ):
+            return "cylinder"
         if (
             circularity >= 0.78
             and aspect_ratio <= 1.15
             and vertex_count >= 7
+            and outline_shape != "hexagon"
             and not has_internal_facets
         ) or sphere_like_outline:
-            return "sphere" if has_shading else "unknown"
+            return "sphere" if has_shading or has_radial_shading else "unknown"
         if vertex_count == 3 or outline_shape == "triangle":
             return (
                 "cone"
@@ -260,17 +316,44 @@ class ShapeRecognizer:
                 or cls._has_cone_shading(gray, object_mask, cv2.boundingRect(contour))
                 else "unknown"
             )
-        # A cylinder needs a rounded end cue. A plain elongated rectangle is
-        # not enough because box faces and shadows often create the same ratio.
-        if aspect_ratio >= 1.15 and (
-            has_elliptical_rim
-            or has_cylinder_rim
-            or (has_rounded_ends and has_shading and not has_internal_facets)
+        if vertex_count >= 6 and cls._has_hexagonal_prism_facets(
+            gray,
+            object_mask,
+            width,
+            height,
         ):
-            return "cylinder"
+            return "hexagonal_prism"
         if has_internal_facets:
             return "box"
+        if outline_shape == "square" and 0.85 <= aspect_ratio <= 1.2:
+            return "box"
+        if (vertex_count == 6 or outline_shape == "hexagon") and aspect_ratio <= 1.4:
+            return "hexagonal_prism"
         return "unknown"
+
+    @staticmethod
+    def _has_radial_shading(
+        gray: np.ndarray,
+        object_mask: np.ndarray,
+        bounds: tuple[int, int, int, int],
+    ) -> bool:
+        x, y, width, height = bounds
+        if min(width, height) < 20:
+            return False
+        yy, xx = np.ogrid[: gray.shape[0], : gray.shape[1]]
+        center_x, center_y = x + width / 2, y + height / 2
+        radial = np.sqrt(
+            ((xx - center_x) / max(width / 2, 1)) ** 2
+            + ((yy - center_y) / max(height / 2, 1)) ** 2
+        )
+        inside = object_mask > 0
+        center_pixels = gray[inside & (radial <= 0.35)]
+        rim_pixels = gray[inside & (radial >= 0.65) & (radial <= 0.9)]
+        if center_pixels.size < 10 or rim_pixels.size < 10:
+            return False
+        center_brightness = float(np.median(center_pixels))
+        rim_brightness = float(np.median(rim_pixels))
+        return abs(center_brightness - rim_brightness) >= 6
 
     @staticmethod
     def _classify_outline(contour: np.ndarray) -> str:
@@ -288,8 +371,13 @@ class ShapeRecognizer:
         rotated_width, rotated_height = cv2.minAreaRect(contour)[1]
         width, height = max(rotated_width, rotated_height), min(rotated_width, rotated_height)
         aspect_ratio = width / max(height, 1)
-        if vertices >= 7 and circularity >= 0.6 and aspect_ratio <= 1.7:
-            return "circle" if aspect_ratio <= 1.15 else "oval"
+        extent = cv2.contourArea(contour) / max(rotated_width * rotated_height, 1)
+        ellipse_roundness = ShapeRecognizer._ellipse_roundness(contour)
+        if circularity >= 0.65 and ellipse_roundness <= 0.12 and extent <= 0.9:
+            if 1.2 <= aspect_ratio <= 2.5:
+                return "oval"
+            if vertices >= 7 and aspect_ratio <= 1.15:
+                return "circle"
         if vertices == 3:
             return "triangle"
         if vertices == 4:
@@ -356,6 +444,51 @@ class ShapeRecognizer:
             if 18 <= angle <= 162 and line_length >= min(width, height) * 0.16:
                 return True
         return False
+
+    @staticmethod
+    def _has_hexagonal_prism_facets(
+        gray: np.ndarray,
+        object_mask: np.ndarray,
+        width: int,
+        height: int,
+    ) -> bool:
+        if min(width, height) < 24:
+            return False
+        interior = cv2.erode(
+            object_mask,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
+        )
+        edges = cv2.bitwise_and(cv2.Canny(gray, 45, 130), interior)
+        minimum_length = max(8, round(min(width, height) * 0.16))
+        lines = cv2.HoughLinesP(
+            edges,
+            1,
+            np.pi / 180,
+            threshold=max(10, minimum_length // 2),
+            minLineLength=minimum_length,
+            maxLineGap=max(3, round(minimum_length * 0.08)),
+        )
+        if lines is None:
+            return False
+
+        directions: list[tuple[float, float]] = []
+        for line in np.asarray(lines).reshape(-1, 4):
+            x1, y1, x2, y2 = (int(value) for value in line)
+            length = float(np.hypot(x2 - x1, y2 - y1))
+            if length < minimum_length:
+                continue
+            angle = abs(np.degrees(np.arctan2(y2 - y1, x2 - x1))) % 180
+            for index, (direction, accumulated_length) in enumerate(directions):
+                difference = abs(angle - direction)
+                if min(difference, 180 - difference) <= 12:
+                    directions[index] = (
+                        direction,
+                        accumulated_length + length,
+                    )
+                    break
+            else:
+                directions.append((angle, length))
+        return sum(length >= minimum_length for _, length in directions) >= 3
 
     @staticmethod
     def _has_horizontal_rim(

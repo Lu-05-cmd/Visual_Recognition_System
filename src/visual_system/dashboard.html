@@ -452,9 +452,9 @@
     const shapeNames = {
       circle: 'hình tròn', oval: 'hình oval', triangle: 'tam giác', rectangle: 'hình chữ nhật',
       square: 'hình vuông', pentagon: 'ngũ giác', hexagon: 'lục giác', polygon: 'đa giác',
-      sphere: 'khối cầu', cylinder: 'hình trụ', cone: 'khối nón', box: 'khối hộp',
+      sphere: 'khối cầu', cylinder: 'hình trụ', cone: 'khối nón', box: 'khối vuông',
       hexagonal_prism: 'lăng trụ lục giác',
-      cube: 'khối hộp', cuboid: 'khối hộp',
+      cube: 'khối vuông', cuboid: 'khối hộp',
       unknown: 'chưa rõ',
     };
     const outlineShapeLabels = new Set([
@@ -570,16 +570,16 @@
       document.getElementById('video-summary').innerHTML = `
         <div class="metric"><span>Số khung hình</span>
           <strong>${summary.processed_frames}</strong></div>
-        <div class="metric"><span>Khung hình trùng đã bỏ qua</span>
+        <div class="metric"><span>Khung hình trùng hoàn toàn đã bỏ qua</span>
           <strong>${summary.duplicate_frames_skipped}</strong></div>
-        <div class="metric"><span>Vật thể duy nhất</span>
+        <div class="metric"><span>Vật thể duy nhất trong toàn video</span>
           <strong>${summary.total_detections}</strong></div>
-        <div class="metric"><span>Lượt phát hiện ở frame đã phân tích (đã bỏ frame trùng)</span>
+        <div class="metric"><span>Lượt phát hiện ở các frame được xử lý</span>
           <strong>${summary.frame_detections}</strong></div>
         <div class="metric"><span>Đạt / Không đạt</span>
           <strong><span class="pass">${summary.passed}</span> /
           <span class="fail">${summary.failed}</span></strong></div>
-        <div class="metric metric-wide"><span>Màu sắc</span>
+        <div class="metric metric-wide"><span>Số vật thể theo màu trong toàn video</span>
           <span>${colorSummary}</span></div>
         <div class="metric metric-wide"><span>Phân loại khối 3D</span>
           <span>${solidSummary}</span></div>`;

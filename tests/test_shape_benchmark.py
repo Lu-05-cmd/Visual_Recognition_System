@@ -9,7 +9,11 @@ from visual_system.services.shape_recognizer import ShapeRecognizer
 
 
 @pytest.mark.parametrize("shape", FLAT_SHAPES)
-def test_flat_silhouettes_are_not_reported_as_3d_shapes(shape: str) -> None:
+def test_flat_silhouettes_use_solid_names_without_exposing_2d_labels(shape: str) -> None:
+    expected = {
+        "square": "box",
+        "hexagon": "hexagonal_prism",
+    }.get(shape, "unknown")
     recognizer = ShapeRecognizer()
     for seed in range(12):
         frame = make_scene(shape, seed)
@@ -17,7 +21,7 @@ def test_flat_silhouettes_are_not_reported_as_3d_shapes(shape: str) -> None:
         detection = Detection("product", 0.95, BoundingBox(x1, y1, x2-x1, y2-y1), color="blue")
         recognizer.recognize(frame, [detection])
         assert detection.shape == "unknown"
-        assert detection.solid_shape == "unknown"
+        assert detection.solid_shape == expected
 
 
 @pytest.mark.parametrize("shape", SOLID_SHAPES)

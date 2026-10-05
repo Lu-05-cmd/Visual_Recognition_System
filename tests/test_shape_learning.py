@@ -1,4 +1,5 @@
 from shape_synthetic import FLAT_SHAPES, make_scene, scene_box
+
 from visual_system.services.shape_library import ShapeFeatureLibrary
 from visual_system.services.shape_recognizer import ShapeRecognizer
 

@@ -86,14 +86,14 @@ class VideoProcessor:
         tracks: set[int] = set()
         serials_by_track: dict[int, int] = {}
         color_serial_counts: Counter[str] = Counter()
-        color_votes: dict[int, Counter[str]] = defaultdict(Counter)
+        colors_by_track: dict[int, str] = {}
         solid_shape_votes: dict[int, Counter[str]] = defaultdict(Counter)
+        outline_shape_votes: dict[int, Counter[str]] = defaultdict(Counter)
         inspection_votes: dict[int, Counter[str]] = defaultdict(Counter)
         processed_frames = 0
         duplicate_frames_skipped = 0
         frame_detections = 0
-        previous_hash: int | None = None
-        previous_color_histogram = None
+        previous_source_frame = None
         previous_annotated_frame = None
         normalized_target = target_color.lower() if target_color else None
         try:
@@ -101,19 +101,43 @@ class VideoProcessor:
                 success, frame = capture.read()
                 if not success:
                     break
-                frame_hash, color_histogram = self._perceptual_hash(frame)
+                source_frame = frame.copy()
                 if (
-                    previous_hash is not None
-                    and (frame_hash ^ previous_hash).bit_count() <= 1
-                    and previous_color_histogram is not None
-                    and cv2.compareHist(
-                        color_histogram,
-                        previous_color_histogram,
-                        cv2.HISTCMP_BHATTACHARYYA,
-                    ) <= 0.015
+                    previous_source_frame is not None
+                    and self._frames_are_duplicates(source_frame, previous_source_frame)
                     and previous_annotated_frame is not None
                 ):
-                    writer.write(previous_annotated_frame)
+                    repeated_result = pipeline.repeat_last_observation(frame.copy())
+                    if repeated_result is not None:
+                        filtered = repeated_result.detections
+                        if normalized_target:
+                            for item in filtered:
+                                if item.color != normalized_target:
+                                    item.inspection = InspectionStatus.FAIL
+                                    item.defects = [*item.defects, "color_mismatch"]
+                        self._assign_serial_numbers(
+                            filtered,
+                            serials_by_track,
+                            color_serial_counts,
+                        )
+                        self._draw_annotations(frame, filtered)
+                        if normalized_target:
+                            self._draw_color_mismatch_boxes(
+                                frame,
+                                filtered,
+                                normalized_target,
+                            )
+                        previous_annotated_frame = frame.copy()
+                        for item in filtered:
+                            self._accumulate_track(
+                                item,
+                                tracks,
+                                colors_by_track,
+                                solid_shape_votes,
+                                outline_shape_votes,
+                                inspection_votes,
+                            )
+                    writer.write(frame)
                     processed_frames += 1
                     duplicate_frames_skipped += 1
                     continue
@@ -134,17 +158,18 @@ class VideoProcessor:
                 if normalized_target:
                     self._draw_color_mismatch_boxes(frame, filtered, normalized_target)
                 writer.write(frame)
-                previous_hash = frame_hash
-                previous_color_histogram = color_histogram
+                previous_source_frame = source_frame
                 previous_annotated_frame = frame.copy()
                 processed_frames += 1
                 for item in filtered:
-                    if item.track_id is None:
-                        continue
-                    tracks.add(item.track_id)
-                    color_votes[item.track_id][item.color or "unknown"] += 1
-                    solid_shape_votes[item.track_id][item.solid_shape or "unknown"] += 1
-                    inspection_votes[item.track_id][item.inspection.value] += 1
+                    self._accumulate_track(
+                        item,
+                        tracks,
+                        colors_by_track,
+                        solid_shape_votes,
+                        outline_shape_votes,
+                        inspection_votes,
+                    )
         finally:
             capture.release()
             writer.release()
@@ -158,7 +183,7 @@ class VideoProcessor:
         passed = 0
         failed = 0
         for track_id in tracks:
-            color = color_votes[track_id].most_common(1)[0][0]
+            color = colors_by_track.get(track_id, "unknown")
             solid_votes = solid_shape_votes[track_id]
             solid_shape = (
                 next(
@@ -170,6 +195,16 @@ class VideoProcessor:
             if solid_shape != "unknown":
                 unique_solid_shapes[solid_shape] += 1
             unique_shapes[solid_shape] += 1
+            outline_shape = next(
+                (
+                    label
+                    for label, _ in outline_shape_votes[track_id].most_common()
+                    if label != "unknown"
+                ),
+                "unknown",
+            )
+            if outline_shape != "unknown":
+                unique_outline_shapes[outline_shape] += 1
             statuses = inspection_votes[track_id]
             if statuses["pass"] > statuses["fail"]:
                 passed += 1
@@ -195,6 +230,14 @@ class VideoProcessor:
         )
 
     @staticmethod
+    def _frames_are_duplicates(first: np.ndarray, second: np.ndarray) -> bool:
+        difference = cv2.absdiff(first, second)
+        changed_pixels = np.count_nonzero(
+            np.max(difference, axis=2) > 1
+        ) / max(first.shape[0] * first.shape[1], 1)
+        return float(np.mean(difference)) <= 0.05 and changed_pixels <= 0.005
+
+    @staticmethod
     def _assign_serial_numbers(
         detections,
         serials_by_track: dict[int, int],
@@ -209,21 +252,22 @@ class VideoProcessor:
             detection.serial_number = serials_by_track[detection.track_id]
 
     @staticmethod
-    def _perceptual_hash(frame) -> tuple[int, np.ndarray]:
-        """Compact luminance signature for consecutive near-identical frames."""
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        reduced = cv2.resize(gray, (32, 32), interpolation=cv2.INTER_AREA)
-        coefficients = cv2.dct(reduced.astype("float32"))[:8, :8]
-        values = coefficients.flatten()[1:]
-        median = float(np.median(values))
-        signature = 0
-        for bit, value in enumerate(values):
-            if value > median:
-                signature |= 1 << bit
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        color_histogram = cv2.calcHist([hsv], [0, 1], None, [12, 4], [0, 180, 0, 256])
-        cv2.normalize(color_histogram, color_histogram, alpha=1, norm_type=cv2.NORM_L1)
-        return signature, color_histogram
+    def _accumulate_track(
+        detection,
+        tracks: set[int],
+        colors_by_track: dict[int, str],
+        solid_shape_votes: dict[int, Counter[str]],
+        outline_shape_votes: dict[int, Counter[str]],
+        inspection_votes: dict[int, Counter[str]],
+    ) -> None:
+        if detection.track_id is None:
+            return
+        tracks.add(detection.track_id)
+        if detection.color and detection.color != "unknown":
+            colors_by_track[detection.track_id] = detection.color
+        solid_shape_votes[detection.track_id][detection.solid_shape or "unknown"] += 1
+        outline_shape_votes[detection.track_id][detection.shape or "unknown"] += 1
+        inspection_votes[detection.track_id][detection.inspection.value] += 1
 
     @staticmethod
     def _encode_for_browser(raw_output_path: Path, output_path: Path) -> None:
@@ -327,8 +371,8 @@ class VideoProcessor:
     @staticmethod
     def _shape_name(detection) -> str:
         solid_names = {
-            "box": "KHOI HOP",
-            "cube": "KHOI HOP",
+            "box": "KHOI VUONG",
+            "cube": "KHOI VUONG",
             "cuboid": "KHOI HOP",
             "sphere": "KHOI CAU",
             "cylinder": "KHOI TRU",
@@ -336,9 +380,9 @@ class VideoProcessor:
             "hexagonal_prism": "LANG TRU LUC GIAC",
         }
         solid_name = solid_names.get(detection.solid_shape)
-        if not solid_name:
-            return "CHUA RO"
-        return solid_name
+        if solid_name:
+            return solid_name
+        return "CHUA RO"
 
     @staticmethod
     def _draw_label(

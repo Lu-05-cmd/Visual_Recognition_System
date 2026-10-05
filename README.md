@@ -4,11 +4,11 @@ Nền tảng hệ thống thị giác máy tính công nghiệp tự động ph�
 
 ## Thành phần hiện tại
 
-- `ColorBlobDetector`: detector baseline bằng OpenCV, không cần model weights.
+- `ColorBlobDetector`: detector baseline bằng OpenCV, không cần model weights; loại box màu lồng bên trong box lớn hơn để một vùng màu con không bị đếm thành sản phẩm riêng.
 - `DominantColorRecognizer`: nhận dạng màu chính từ vùng sản phẩm.
-- `ShapeRecognizer`: chỉ xuất nhãn khối 3D `sphere`, `cylinder`, `cone`, `box`, `hexagonal_prism`; nhãn đường viền 2D không được xuất thay nhãn khối. Khi nhận dạng 3D chưa chắc chắn, đường viền (tròn/oval, tam giác, chữ nhật/oval hoặc đa giác) được dùng làm bằng chứng phụ cùng shading, vành tròn hoặc mặt khối; silhouette phẳng vẫn là `unknown`. Có thể dùng heuristic OpenCV và neural solid head nếu checkpoint đạt tiêu chí.
+- `ShapeRecognizer`: chỉ xuất nhãn khối `sphere`, `cylinder`, `cone`, `box` (hiển thị là khối vuông), `hexagonal_prism`; không xuất nhãn đường viền 2D. Silhouette vuông gần đều được ánh xạ thành `box`, silhouette sáu cạnh thành `hexagonal_prism`; các lớp còn lại cần cue phân biệt phù hợp hoặc ảnh mẫu 3D. Vật thể bị cắt khỏi khung vẫn trả `unknown`.
 - `ShapeFeatureLibrary`: quản lý ảnh mẫu để huấn luyện; dữ liệu đường viền 2D cũ được giữ tương thích nhưng không tham gia nhận dạng runtime và không thể thêm mới qua API.
-- `CentroidTracker`: gán `track_id` ổn định giữa các frame.
+- `CentroidTracker`: gán `track_id` ổn định giữa các frame và chỉ đổi màu sau khi màu mới chiếm ít nhất 5/9 quan sát gần nhất.
 - `BasicInspector`: kiểm tra baseline bằng tỷ lệ cạnh ảnh.
 - FastAPI dashboard và API demo.
 
@@ -65,9 +65,9 @@ Sau khi xử lý xong, dashboard phát video kết quả và hiển thị:
 - số frame đã xử lý;
 - số vật thể duy nhất được theo dõi;
 - tổng lượt phát hiện qua các frame (một vật thể xuất hiện ở nhiều frame được tính nhiều lượt);
-- số frame trùng liên tiếp được nhận ra bằng perceptual hash và bỏ qua bước nhận dạng để tránh đếm lại;
+- số frame trùng pixel liên tiếp được bỏ qua detector/classifier; kết quả nhận dạng đã lưu vẫn được dùng để cập nhật xác nhận track và nhãn video;
 - số sản phẩm `PASS` và `FAIL`;
-- thống kê màu sắc và hình dạng theo vật thể duy nhất.
+- thống kê màu sắc và hình dạng theo vật thể duy nhất trong toàn clip (không phải số vật thể đang có mặt cùng lúc).
 
 API upload tương ứng là `POST /api/video/process` với multipart field `file`. Video kết quả được trả về qua `video_url`.
 
@@ -75,7 +75,7 @@ API upload tương ứng là `POST /api/video/process` với multipart field `fi
 
 Dashboard có mục **Bổ sung mẫu hình dạng** để gửi nhiều ảnh vật thể cùng nhãn. Ảnh gốc được lưu thành PNG trong `data/shape_library/<nhãn>/`, còn thông tin và đặc trưng được lưu trong `data/shape_library.sqlite3`. Có thể xóa riêng từng mẫu. Thêm ảnh vào kho không tự train lại model.
 
-Kho mẫu có thể được xem qua `GET /api/shapes/library` và bổ sung qua `POST /api/shapes/samples` (multipart field `files` nhận nhiều ảnh, field `label` nhận `sphere`, `cylinder`, `cone`, `box`, `hexagonal_prism`). Nhãn mẫu cũ `cube` và `cuboid` được gộp thành `box`. Các mẫu đường viền 2D đã lưu từ trước được giữ trong database để tương thích nhưng không được dùng trong nhận dạng runtime; `hexagon` 2D là ví dụ âm `none`, không phải lăng trụ lục giác 3D.
+Kho mẫu có thể được xem qua `GET /api/shapes/library` và bổ sung qua `POST /api/shapes/samples` (multipart field `files` nhận nhiều ảnh, field `label` nhận `sphere`, `cylinder`, `cone`, `box`, `hexagonal_prism`). Nhãn mẫu cũ `cube` và `cuboid` được gộp thành `box`. Các mẫu đường viền 2D đã lưu từ trước được giữ trong database để tương thích; nhánh train vẫn dùng chúng làm ví dụ âm `none`. Ở runtime, silhouette vuông gần đều được hiển thị là khối vuông và silhouette sáu cạnh gọn được hiển thị là lăng trụ lục giác theo yêu cầu sản phẩm.
 
 ### Chuẩn bị dữ liệu
 
@@ -103,7 +103,7 @@ Có thể đổi đường dẫn database, checkpoint, số epoch hoặc seed:
 .venv\Scripts\python.exe -m visual_system.train_shapes --epochs 80 --seed 42 --output data/models/shape_net.pt
 ```
 
-Mỗi epoch in `train_loss`, `validation_loss`, độ chính xác và precision/recall theo từng lớp của các đầu tương thích 2D/3D. Cuối đợt train, checkpoint tốt nhất theo macro recall validation được lưu tại đường dẫn `--output` (mặc định `data/models/shape_net.pt`), kèm lịch sử, số mẫu và báo cáo chất lượng. Chỉ nhánh 3D đạt đủ mẫu train/validation và precision, recall, accuracy ít nhất 70% mới được ứng dụng nạp; nhánh 2D luôn bị bỏ qua. API tự nạp checkpoint hợp lệ; model không train lại mỗi lần chạy. Sau khi thêm ảnh mới, cần chạy lệnh train lại. Nếu train lỗi trước khi hoàn tất, checkpoint đích chưa được cập nhật.
+Mỗi epoch in `train_loss`, `validation_loss`, độ chính xác và precision/recall theo từng lớp của các đầu tương thích 2D/3D. Cuối đợt train, checkpoint tốt nhất theo macro recall validation được lưu tại đường dẫn `--output` (mặc định `data/models/shape_net.pt`), kèm lịch sử, số mẫu và báo cáo chất lượng. Chỉ nhánh 3D đạt đủ mẫu train/validation và precision, recall, accuracy ít nhất 70% mới được ứng dụng nạp; nhánh neural 2D hiện không dùng trong runtime. API tự nạp checkpoint hợp lệ; model không train lại mỗi lần chạy. Sau khi thêm ảnh mới, cần chạy lệnh train lại. Nếu train lỗi trước khi hoàn tất, checkpoint đích chưa được cập nhật.
 
 Neural chỉ thay nhãn heuristic khi confidence đạt 0.85 và nhánh 3D vượt quality gate trong validation. Khi chưa cài PyTorch hoặc chưa có checkpoint đạt gate, API tiếp tục chạy heuristic khối 3D. Nếu checkpoint không đạt yêu cầu, báo cáo cuối lệnh train chỉ rõ lớp còn thiếu mẫu hoặc độ chính xác thấp; hãy bổ sung/kiểm tra nhãn và train lại thay vì chỉ tăng epoch.
 
@@ -113,7 +113,7 @@ Checkpoint cũ không được nạp vì bộ nhãn khối đã thay đổi. Sau
 
 Validation nội bộ giúp so sánh các lần train, nhưng cần tập test độc lập gồm ảnh/video thật từ các lần quay khác. Đánh giá nhãn khối 3D theo từng lớp và các trường hợp nhầm lẫn; không dùng độ chính xác nhánh 2D làm tiêu chí ứng dụng. Mục tiêu 85% chỉ được xác nhận khi đạt trên tập video thật holdout đại diện cho điều kiện vận hành. Các ảnh render SolidWorks và dữ liệu tăng cường không thay thế đánh giá thực tế.
 
-Kết quả hình dạng trong video được làm ổn định bằng đồng thuận qua nhiều frame; track tồn tại tối đa 20 frame bị mất trước khi được đóng để tránh ghép nhầm vật thể khác.
+Kết quả hình dạng trong video được xác nhận khi một nhãn chiếm ít nhất 3 trong tối đa 5 quan sát hợp lệ gần nhất; frame chưa rõ không xóa các quan sát hợp lệ. Track tồn tại tối đa 20 frame bị mất trước khi được đóng để tránh ghép nhầm vật thể khác.
 
 ## Kiểm thử
 
@@ -122,7 +122,7 @@ pytest -q --basetemp=.pytest-tmp
 ruff check .
 ```
 
-`tests/test_shape_benchmark.py` kiểm tra các silhouette phẳng không bị xuất thành nhãn 3D, đánh giá nhận dạng khối 3D và định vị detector. `tests/test_shape_learning.py` giữ kiểm thử tương thích cho kho mẫu cũ; kho đó không tham gia nhận dạng runtime. `tests/test_video_processor.py` kiểm tra frame lặp, video đầu ra và track khi vật thể di chuyển. `tests/test_shape_library_integration.py` kiểm tra luồng fallback khi heuristic không nhận dạng được. Chạy lại toàn bộ suite sau mỗi thay đổi nhận dạng.
+`tests/test_shape_benchmark.py` kiểm tra silhouette vuông/lục giác chỉ xuất nhãn khối tương ứng, không xuất tên hình 2D, đồng thời đánh giá nhận dạng các khối 3D khác và định vị detector. `tests/test_shape_learning.py` giữ kiểm thử tương thích cho kho mẫu cũ. `tests/test_video_processor.py` kiểm tra frame lặp, video đầu ra và track khi vật thể di chuyển. `tests/test_shape_library_integration.py` kiểm tra phân giải bằng mẫu 3D. Chạy lại toàn bộ suite sau mỗi thay đổi nhận dạng.
 
 Kho mẫu dùng descriptor phiên bản 2 và được nâng cấp từ ảnh mẫu hiện có khi khởi động. Benchmark tổng hợp và ảnh train nội bộ không đại diện cho độ chính xác trên dây chuyền thật; cần đánh giá thêm bằng video thật đã gán nhãn, tách riêng khỏi ảnh huấn luyện.
 
@@ -138,7 +138,7 @@ Kho mẫu dùng descriptor phiên bản 2 và được nâng cấp từ ảnh m�
 
 1. **Tích hợp kho mẫu làm fallback** (`shape_recognizer.py`):
    - Gọi `ShapeFeatureLibrary.classify()` khi heuristic trả `unknown`
-   - Guard `_is_flat_silhouette_only()` ngăn silhouette phẳng được nhãn là 3D
+   - Guard `_is_flat_silhouette_only()` ngăn fallback thư viện gán nhãn khi không có cạnh bên trong; silhouette vuông/lục giác có ánh xạ runtime riêng
    - Truyền `shape_library_path` qua `VisionPipeline` → `api.create_app()` → `VideoProcessor`
 
 2. **Cải tiến heuristic cho hình nón** (`_classify_solid_extracted()` → cone branch):
@@ -150,10 +150,12 @@ Kho mẫu dùng descriptor phiên bản 2 và được nâng cấp từ ảnh m�
    - Chỉ dùng khi strict `classify()` trả `None`
    - Vẫn bảo vệ chống nhãn sai cho 2D
 
-4. **Ổn định nhãn qua frame** (đã có `SHAPE_CONFIRMATION_FRAMES = 5`):
-   - Nhãn chỉ lock sau 5 frame liên tiếp cùng nhãn
-   - Trước đó hiển thị `unknown` để tránh dao động trong thống kê
-   - Sau lock, nhãn được bảo vệ dù frame sau xảy ra lỗi tạm thời
+4. **Ổn định nhãn khối 3D qua frame**:
+   - Nhãn khối được xác nhận khi chiếm ít nhất 3 trong tối đa 5 quan sát hợp lệ gần nhất
+   - Frame chưa phân loại được không xóa các quan sát hợp lệ trước đó
+   - Sau khi xác nhận, nhãn được giữ đến hết vòng đời track
+
+Runtime không hiển thị nhãn hình phẳng 2D. Silhouette vuông gần đều được gán lớp `box` và silhouette lục giác gần đều được gán `hexagonal_prism`; cách ánh xạ từ hình chiếu có thể nhầm vật thể phẳng cùng đường viền với khối 3D. Các lớp khác cần bằng chứng khối hoặc mẫu phù hợp; khi không đủ bằng chứng, kết quả là `unknown`/“CHUA RO”.
 
 ### Kết quả thử nghiệm
 

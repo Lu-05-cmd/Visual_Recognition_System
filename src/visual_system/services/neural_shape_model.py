@@ -6,6 +6,7 @@ dependency until a checkpoint is enabled or the training command is used.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,7 @@ SOLID_TO_OUTLINE = {
 }
 
 SOLID_LABEL_ALIASES = {"cube": "box", "cuboid": "box"}
+logger = logging.getLogger(__name__)
 
 
 def prepare_image(image: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
@@ -182,6 +184,7 @@ class NeuralShapeModel:
             self._torch = None
             self._loaded_mtime_ns = None
             self._load_error = str(exc)
+            logger.warning("Neural shape model is unavailable: %s", exc)
             return False
 
     @property

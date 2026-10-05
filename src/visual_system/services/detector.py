@@ -127,8 +127,8 @@ class ColorBlobDetector:
         ranked = sorted(
             detections,
             key=lambda item: (
-                ColorBlobDetector._box_solidity(item),
                 item.bounding_box.width * item.bounding_box.height,
+                ColorBlobDetector._box_solidity(item),
             ),
             reverse=True,
         )

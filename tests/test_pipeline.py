@@ -1,10 +1,12 @@
 import cv2
 import numpy as np
 import pytest
+from shape_synthetic import make_scene
 
 from visual_system.models import BoundingBox, Detection
 from visual_system.pipeline import VisionPipeline
 from visual_system.ports import Detector
+from visual_system.services.detector import ColorBlobDetector
 from visual_system.services.shape_recognizer import ShapeRecognizer
 from visual_system.services.tracker import CentroidTracker
 
@@ -40,9 +42,53 @@ def test_pipeline_detects_colors_and_assigns_tracks() -> None:
     assert len(result.detections) == 2
     assert {item.color for item in result.detections} == {"red", "green"}
     assert {item.shape for item in result.detections} == {"unknown"}
-    assert {item.solid_shape for item in result.detections} == {"unknown"}
+    assert {item.solid_shape for item in result.detections} == {"box", "unknown"}
     assert {item.track_id for item in result.detections} == {1, 2}
     assert all(item.inspection.value == "pass" for item in result.detections)
+
+
+def test_pipeline_labels_hexagonal_prism_after_stable_observations() -> None:
+    pipeline = VisionPipeline(min_area=120)
+    frame = make_scene("hexagonal_prism", seed=0)
+
+    for _ in range(3):
+        result = pipeline.process(frame)
+
+    assert len(result.detections) == 1
+    assert result.detections[0].solid_shape == "hexagonal_prism"
+
+
+def test_pipeline_repeats_cached_observation_to_confirm_duplicate_video_frames() -> None:
+    pipeline = VisionPipeline(min_area=120)
+    frame = make_scene("hexagonal_prism", seed=0)
+
+    first = pipeline.process(frame)
+    second = pipeline.repeat_last_observation(frame)
+    third = pipeline.repeat_last_observation(frame)
+
+    assert second is not None
+    assert third is not None
+    assert first.detections[0].solid_shape == "unknown"
+    assert third.detections[0].solid_shape == "hexagonal_prism"
+    assert {first.frame_id, second.frame_id, third.frame_id} == {1, 2, 3}
+    assert len(
+        {
+            first.detections[0].track_id,
+            second.detections[0].track_id,
+            third.detections[0].track_id,
+        }
+    ) == 1
+
+
+def test_detector_does_not_count_a_color_patch_inside_a_wide_object_twice() -> None:
+    frame = np.zeros((180, 240, 3), dtype=np.uint8)
+    cv2.rectangle(frame, (40, 65), (180, 105), (0, 0, 255), -1)
+    cv2.rectangle(frame, (95, 72), (125, 98), (0, 255, 255), -1)
+
+    detections = ColorBlobDetector(min_area=100).detect(frame)
+
+    assert len(detections) == 1
+    assert detections[0].bounding_box.width > detections[0].bounding_box.height
 
 
 def test_pipeline_detects_neutral_object_against_light_background() -> None:
@@ -56,7 +102,7 @@ def test_pipeline_detects_neutral_object_against_light_background() -> None:
 
     assert len(result.detections) == 1
     assert result.detections[0].shape == "unknown"
-    assert result.detections[0].solid_shape == "unknown"
+    assert result.detections[0].solid_shape == "box"
 
 
 def test_pipeline_detects_edge_objects_on_a_conveyor_without_using_belt_as_shape():
@@ -81,8 +127,11 @@ def test_pipeline_detects_edge_objects_on_a_conveyor_without_using_belt_as_shape
     assert [item.color for item in result.detections] == [
         "purple", "purple", "blue", "green", "yellow", "orange", "red"
     ]
+    assert result.detections[0].shape == "unknown"
     assert all(item.shape == "unknown" for item in result.detections)
-    assert all(item.solid_shape == "unknown" for item in result.detections)
+    assert [item.solid_shape for item in result.detections] == [
+        "unknown", "box", "unknown", "unknown", "unknown", "box", "unknown"
+    ]
 
 
 def test_pipeline_ignores_conveyor_as_object_and_finds_small_purple_object():
@@ -112,7 +161,7 @@ def test_pipeline_ignores_conveyor_as_object_and_finds_small_purple_object():
     assert len(result.detections) == 3
     assert [item.color for item in result.detections] == ["red", "purple", "purple"]
     assert [item.solid_shape for item in result.detections] == [
-        "unknown", "unknown", "unknown"
+        "box", "box", "unknown"
     ]
 
     for _ in range(2):
@@ -217,6 +266,24 @@ def test_shape_recognizer_uses_oval_outline_and_shading_for_sphere(
 
     ShapeRecognizer().recognize(frame, [detection])
 
+    assert detection.solid_shape == "sphere"
+
+
+def test_shape_recognizer_uses_low_contrast_radial_shading_for_sphere() -> None:
+    size = 120
+    yy, xx = np.mgrid[:size, :size]
+    radius = np.sqrt((xx - 60) ** 2 + (yy - 60) ** 2) / 44
+    inside = radius <= 1
+    hsv = np.zeros((size, size, 3), dtype=np.uint8)
+    hsv[:, :, 0] = 5
+    hsv[:, :, 1] = 220
+    hsv[:, :, 2] = np.where(inside, 220 - 28 * radius, 0).astype(np.uint8)
+    frame = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+    detection = Detection("product", 0.95, BoundingBox(0, 0, size, size), color="red")
+
+    ShapeRecognizer().recognize(frame, [detection])
+
+    assert detection.shape == "unknown"
     assert detection.solid_shape == "sphere"
 
 

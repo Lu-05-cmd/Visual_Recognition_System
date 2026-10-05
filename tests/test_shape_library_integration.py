@@ -5,10 +5,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from visual_system.models import Detection, BoundingBox
-from visual_system.services.shape_recognizer import ShapeRecognizer
+from tests.shape_synthetic import make_scene, scene_box
+from visual_system.models import BoundingBox, Detection
 from visual_system.services.shape_library import ShapeFeatureLibrary
-from tests.shape_synthetic import make_scene
+from visual_system.services.shape_recognizer import ShapeRecognizer
+from visual_system.services.tracker import CentroidTracker
 
 
 def test_shape_library_fallback_when_heuristic_fails() -> None:
@@ -64,6 +65,81 @@ def test_flat_silhouette_rejected_by_library_guard() -> None:
         # Flat silhouette should remain unknown, not be labeled as sphere
         assert len(result) == 1
         assert result[0].solid_shape == "unknown"
+
+
+def test_library_resolves_hexagonal_prism_when_heuristic_confuses_it_with_box(
+    tmp_path, monkeypatch
+) -> None:
+    library = ShapeFeatureLibrary(tmp_path / "shapes.db")
+    for shape in ("box", "hexagonal_prism"):
+        for seed in range(4):
+            library.add_image(make_scene(shape, seed), shape)
+
+    frame = make_scene("hexagonal_prism", seed=7)
+    x1, y1, x2, y2 = scene_box("hexagonal_prism", seed=7)
+    monkeypatch.setattr(
+        ShapeRecognizer,
+        "_classify_solid_extracted",
+        classmethod(lambda cls, crop, extracted: "box"),
+    )
+    recognizer = ShapeRecognizer(shape_library=library)
+    tracker = CentroidTracker(max_distance=40)
+    detections = []
+    for _ in range(5):
+        detection = Detection(
+            "object",
+            0.95,
+            BoundingBox(x1, y1, x2 - x1, y2 - y1),
+            color="blue",
+        )
+        recognizer.recognize(frame, [detection])
+        tracker.update([detection])
+        detections.append(detection)
+
+    assert detections[-1].solid_shape == "hexagonal_prism"
+    assert len({detection.track_id for detection in detections}) == 1
+
+
+def test_flat_hexagon_is_reported_as_prism_without_a_2d_label() -> None:
+    frame = make_scene("hexagon", seed=5)
+    x1, y1, x2, y2 = scene_box("hexagon", seed=5)
+    detection = Detection(
+        "object",
+        0.95,
+        BoundingBox(x1, y1, x2 - x1, y2 - y1),
+        color="blue",
+    )
+
+    ShapeRecognizer().recognize(frame, [detection])
+
+    assert detection.shape == "unknown"
+    assert detection.solid_shape == "hexagonal_prism"
+
+
+def test_library_keeps_box_and_prism_classes_separate_across_view_variations(
+    tmp_path,
+) -> None:
+    library = ShapeFeatureLibrary(tmp_path / "shapes.db")
+    for label in ("box", "hexagonal_prism"):
+        for seed in range(4):
+            library.add_image(make_scene(label, seed), label)
+
+    recognizer = ShapeRecognizer(shape_library=library)
+    for label in ("box", "hexagonal_prism"):
+        for seed in range(12):
+            frame = make_scene(label, seed)
+            x1, y1, x2, y2 = scene_box(label, seed)
+            detection = Detection(
+                "object",
+                0.95,
+                BoundingBox(x1, y1, x2 - x1, y2 - y1),
+                color="blue",
+            )
+            recognizer.recognize(frame, [detection])
+
+            assert detection.solid_shape == label, (
+                f"{label} seed={seed} classified as {detection.solid_shape}"
+            )
 
 
 def test_relaxed_classifier_exists() -> None:

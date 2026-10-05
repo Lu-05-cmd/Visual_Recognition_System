@@ -34,7 +34,7 @@ where = ["src"]
 visual_system = ["dashboard.html"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "tests", "."]
 testpaths = ["tests"]
 
 [tool.ruff]
