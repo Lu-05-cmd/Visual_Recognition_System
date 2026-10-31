@@ -47,6 +47,40 @@ def test_pipeline_detects_colors_and_assigns_tracks() -> None:
     assert all(item.inspection.value == "pass" for item in result.detections)
 
 
+@pytest.mark.parametrize(
+    ("color_name", "hue", "saturation", "value"),
+    (
+        ("red", 5, 200, 180),
+        ("orange", 16, 200, 180),
+        ("yellow", 30, 200, 180),
+        ("green", 60, 150, 120),
+        ("blue", 105, 150, 120),
+        ("purple", 135, 150, 180),
+        ("violet", 155, 100, 45),
+    ),
+)
+def test_pipeline_detects_hsv_color_ranges_on_gray_conveyor(
+    color_name: str,
+    hue: int,
+    saturation: int,
+    value: int,
+) -> None:
+    frame = np.full((180, 260, 3), (10, 14, 15), dtype=np.uint8)
+    cv2.rectangle(frame, (0, 55), (259, 150), (72, 76, 77), -1)
+    product = np.zeros((180, 260, 3), dtype=np.uint8)
+    product_mask = np.zeros((180, 260), dtype=np.uint8)
+    cv2.circle(product, (130, 100), 25, (hue, saturation, value), -1)
+    cv2.circle(product_mask, (130, 100), 25, 255, -1)
+    product_bgr = cv2.cvtColor(product, cv2.COLOR_HSV2BGR)
+    product_mask = product_mask > 0
+    frame[product_mask] = product_bgr[product_mask]
+
+    result = VisionPipeline(min_area=100).process(frame)
+
+    assert len(result.detections) == 1
+    assert result.detections[0].color == color_name
+
+
 def test_pipeline_labels_hexagonal_prism_after_stable_observations() -> None:
     pipeline = VisionPipeline(min_area=120)
     frame = make_scene("hexagonal_prism", seed=0)
@@ -125,7 +159,7 @@ def test_pipeline_detects_edge_objects_on_a_conveyor_without_using_belt_as_shape
     assert len(result.detections) == 7
     assert result.detections[0].bounding_box.x == 0
     assert [item.color for item in result.detections] == [
-        "purple", "purple", "blue", "green", "yellow", "orange", "red"
+        "purple", "violet", "blue", "green", "yellow", "orange", "red"
     ]
     assert result.detections[0].shape == "unknown"
     assert all(item.shape == "unknown" for item in result.detections)
@@ -174,6 +208,19 @@ def test_pipeline_ignores_conveyor_as_object_and_finds_small_purple_object():
         item.bounding_box.width * item.bounding_box.height
         for item in result.detections
     ) < frame.shape[0] * frame.shape[1] * 0.3
+
+
+def test_pipeline_rejects_bottom_conveyor_band_that_wraps_product_row() -> None:
+    frame = np.full((185, 888, 3), (10, 14, 15), dtype=np.uint8)
+    cv2.rectangle(frame, (0, 140), (887, 151), (72, 76, 77), -1)
+    cv2.rectangle(frame, (10, 150), (850, 170), (255, 0, 0), -1)
+    cv2.circle(frame, (200, 80), 18, (0, 255, 0), -1)
+
+    result = VisionPipeline(min_area=400).process(frame)
+
+    assert len(result.detections) == 1
+    assert result.detections[0].color == "green"
+    assert result.detections[0].bounding_box.y > 50
 
 
 def test_pipeline_keeps_detection_but_does_not_guess_shape_for_clipped_object():

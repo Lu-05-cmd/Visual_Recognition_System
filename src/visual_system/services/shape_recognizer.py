@@ -240,7 +240,10 @@ class ShapeRecognizer:
         vertex_count = len(approximation)
         _, _, width, height = cv2.boundingRect(contour)
         aspect_ratio = max(width, height) / max(min(width, height), 1)
-        circularity = 4 * np.pi * cv2.contourArea(contour) / (perimeter * perimeter)
+        area = cv2.contourArea(contour)
+        circularity = 4 * np.pi * area / (perimeter * perimeter)
+        extent = area / max(width * height, 1)
+        box_aspect_ratio = width / max(height, 1)
 
         object_mask = np.zeros(mask.shape, dtype=np.uint8)
         cv2.drawContours(object_mask, [contour], -1, 255, -1)
@@ -287,6 +290,11 @@ class ShapeRecognizer:
             and ellipse_roundness <= 0.16
             and not has_internal_facets
         )
+        precise_circle = (
+            circularity >= 0.83
+            and 0.72 <= extent <= 0.81
+            and 0.88 <= box_aspect_ratio <= 1.15
+        )
         has_radial_shading = cls._has_radial_shading(
             gray,
             object_mask,
@@ -301,8 +309,7 @@ class ShapeRecognizer:
         ):
             return "cylinder"
         if (
-            circularity >= 0.78
-            and aspect_ratio <= 1.15
+            precise_circle
             and vertex_count >= 7
             and outline_shape != "hexagon"
             and not has_internal_facets

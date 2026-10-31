@@ -17,6 +17,7 @@ VALID_COLORS = {
     "orange",
     "yellow",
     "purple",
+    "violet",
     "black",
     "white",
     "gray",
@@ -54,12 +55,14 @@ async def process_video(
         ).process(input_path, output_path, target_color=target_color)
     finally:
         input_path.unlink(missing_ok=True)
+    summary_data = summary.__dict__.copy()
+    summary_data["processing_time_seconds"] = round(
+        perf_counter() - processing_started,
+        3,
+    )
     return VideoProcessResponse(
         video_url=f"/api/video/result/{output_path.name}",
-        summary=VideoSummaryResponse(
-            **summary.__dict__,
-            processing_time_seconds=round(perf_counter() - processing_started, 3),
-        ),
+        summary=VideoSummaryResponse(**summary_data),
     )
 
 

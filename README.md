@@ -20,6 +20,69 @@ Các service được tách riêng để thay detector bằng YOLO/ONNX hoặc n
 - `VisionPipeline` điều phối detector, nhận dạng màu/hình dạng, tracking và inspector. Hợp đồng `Detector` nằm ở `ports.py`; pipeline chỉ cần `detect(frame)` và không phụ thuộc thuật toán mask OpenCV.
 - `services/` chứa các tích hợp và thuật toán độc lập; `models.py` chứa cấu trúc dữ liệu dùng chung. Có thể tiêm `detector_factory` vào `create_app()` để thay detector đồng nhất cho endpoint frame, camera và video; mặc định vẫn là detector OpenCV chạy offline.
 
+### Sơ đồ khối tổng thể
+
+Sơ đồ dưới đây thể hiện hai luồng đầu vào ảnh/frame và video, các service xử lý dùng chung, cùng ranh giới giữa API, dashboard và lưu trữ:
+
+```mermaid
+flowchart TD
+    User[Người dùng] --> Browser[Trình duyệt]
+    Browser <-->|Giao diện| Dashboard[Dashboard HTML]
+    Dashboard -->|GET /| DashboardAPI[Dashboard router]
+    Dashboard -->|POST /api/camera/frame| CameraAPI[Camera router]
+    Dashboard -->|POST /api/video/process| VideoAPI[Video router]
+    Dashboard -->|GET /api/video/result| ResultAPI[Video result endpoint]
+    Dashboard -->|GET /api/shapes/library<br/>POST /api/shapes/samples<br/>DELETE /api/shapes/samples| ShapesAPI[Shapes router]
+    Dashboard -->|GET /health<br/>POST /api/reset| HealthAPI[Health router]
+
+    subgraph App[Ứng dụng FastAPI]
+        DashboardAPI
+        CameraAPI
+        VideoAPI
+        ResultAPI
+        ShapesAPI
+        HealthAPI
+        AppFactory[create_app<br/>Settings và khởi tạo service]
+    end
+
+    CameraAPI -->|Ảnh giải mã thành frame| CameraPipeline[VisionPipeline<br/>camera]
+    VideoAPI -->|Video tải lên và tùy chọn lọc màu| VideoProcessor[VideoProcessor]
+    VideoProcessor -->|Đọc từng frame| VideoPipeline[VisionPipeline<br/>video]
+    VideoProcessor -->|Video có overlay + thống kê| OutputVideo[(Video kết quả)]
+    OutputVideo --> ResultAPI
+    ResultAPI -->|video_url| Dashboard
+    VideoProcessor -->|Thời gian, frame, track,<br/>màu, hình dạng, PASS/FAIL| Dashboard
+    CameraPipeline -->|Frame JPEG có overlay| CameraAPI
+    CameraAPI --> Dashboard
+
+    subgraph Processing[Luồng xử lý trong mỗi VisionPipeline]
+        Detector[ColorBlobDetector<br/>phát hiện và tạo contour]
+        Color[DominantColorRecognizer<br/>nhận dạng màu]
+        Shape[ShapeRecognizer<br/>đường bao và khối 3D]
+        Tracker[CentroidTracker<br/>gán ID và ổn định nhãn]
+        Inspector[BasicInspector<br/>kiểm tra chất lượng]
+        FrameResult[FrameResult<br/>Detection và BoundingBox]
+        Detector --> Color --> Shape --> Tracker --> Inspector --> FrameResult
+    end
+
+    CameraPipeline -. thực thi .-> Detector
+    VideoPipeline -. thực thi .-> Detector
+    AppFactory --> CameraPipeline
+    AppFactory --> ShapesAPI
+    AppFactory -->|Cấu hình pipeline| CameraPipeline
+    AppFactory -->|Cấu hình pipeline| VideoProcessor
+
+    ShapeLibrary[ShapeFeatureLibrary<br/>mẫu và đặc trưng] --> Shape
+    NeuralModel[NeuralShapeModel<br/>tùy chọn] --> Shape
+    ShapesAPI --> ShapeLibrary
+    ShapeLibrary --> LibraryStore[(SQLite và ảnh mẫu)]
+    Train[train_shapes<br/>huấn luyện offline] -->|Checkpoint tùy chọn| NeuralModel
+    TrainingData[(Ảnh mẫu đã gán nhãn)] --> Train
+
+    Contracts[models.py, ports.py,<br/>schemas.py] -. hợp đồng dữ liệu .-> Processing
+    Settings[config.py<br/>ngưỡng và đường dẫn model] -. cấu hình .-> AppFactory
+```
+
 Mọi lần tái cấu trúc cần giữ hành vi API hiện tại và có test cho app được tạo với storage riêng, để chạy nhiều cấu hình test không đụng dữ liệu mặc định trong `data/`.
 
 ## Cài đặt

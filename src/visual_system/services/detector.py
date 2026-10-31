@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 
 from visual_system.models import BoundingBox, Detection
+from visual_system.services.color_ranges import HSV_COLOR_RANGES
 
 
 class ColorBlobDetector:
@@ -41,6 +42,7 @@ class ColorBlobDetector:
                 if (
                     box_area > allowed_area
                     or aspect_ratio > 3.5
+                    or self._is_conveyor_band(x, y, w, h, width, height)
                 ):
                     continue
                 object_mask = np.zeros(mask.shape, dtype=np.uint8)
@@ -108,6 +110,24 @@ class ColorBlobDetector:
                 )
             )
         return detections
+
+    @staticmethod
+    def _is_conveyor_band(
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        frame_width: int,
+        frame_height: int,
+    ) -> bool:
+        bottom_margin = max(6, round(frame_height * 0.07))
+        return (
+            y + height >= frame_height - bottom_margin
+            and y >= max(0, frame_height * 0.45)
+            and width >= frame_width * 0.18
+            and height <= max(12, frame_height * 0.28)
+            and width / max(height, 1) >= 2.0
+        )
 
     @staticmethod
     def _expand_box(box: BoundingBox, frame_width: int, frame_height: int) -> BoundingBox:
@@ -179,28 +199,22 @@ class ColorBlobDetector:
 
     @staticmethod
     def create_detection_masks(frame: np.ndarray) -> list[np.ndarray]:
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        blurred = cv2.GaussianBlur(frame, (5, 5), 0)
+        hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
         color_masks: list[np.ndarray] = []
-        hue_ranges = (
-            ((0, 10), (170, 179)),
-            ((10, 22),),
-            ((22, 40),),
-            ((40, 85),),
-            # Keep blue separate from violet; hue 135+ is purple.
-            ((90, 140),),
-            ((140, 169),),
-        )
+        purple_violet_mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        for ranges in hue_ranges:
+        for color_name, ranges in HSV_COLOR_RANGES.items():
             color_mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
-            for lower_hue, upper_hue in ranges:
-                color_mask |= cv2.inRange(
-                    hsv,
-                    (lower_hue, 45, 25),
-                    (upper_hue, 255, 255),
-                )
+            for lower, upper in ranges:
+                color_mask |= cv2.inRange(hsv, lower, upper)
             color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_OPEN, kernel)
-            color_masks.append(cv2.morphologyEx(color_mask, cv2.MORPH_CLOSE, kernel))
+            color_mask = cv2.morphologyEx(color_mask, cv2.MORPH_CLOSE, kernel)
+            if color_name in {"purple", "violet"}:
+                purple_violet_mask |= color_mask
+            else:
+                color_masks.append(color_mask)
+        color_masks.append(purple_violet_mask)
 
         foreground_mask = ColorBlobDetector._neutral_foreground_mask(hsv)
         active_color_masks = [mask for mask in color_masks if np.count_nonzero(mask) >= 100]
@@ -232,7 +246,13 @@ class ColorBlobDetector:
                     y + box_height >= height,
                 )
             )
-            if touches_edges >= 2 or area > height * width * 0.3:
+            is_belt_strip = (
+                y + box_height >= height - max(4, round(height * 0.06))
+                and box_width >= width * 0.18
+                and box_height <= max(12, round(height * 0.24))
+                and box_width / max(box_height, 1) >= 2.0
+            )
+            if touches_edges >= 2 or area > height * width * 0.3 or is_belt_strip:
                 continue
             result[labels == component] = 255
         return result

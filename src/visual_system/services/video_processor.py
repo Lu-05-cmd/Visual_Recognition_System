@@ -3,6 +3,7 @@ import subprocess
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import Callable
 
 import cv2
@@ -15,22 +16,23 @@ from visual_system.ports import Detector
 
 @dataclass(frozen=True)
 class VideoSummary:
-    frame_count: int
-    processed_frames: int
-    duplicate_frames_skipped: int
-    total_detections: int
-    frame_detections: int
-    unique_tracks: int
-    passed: int
-    failed: int
-    colors: dict[str, int]
-    unique_colors: dict[str, int]
-    unique_shapes: dict[str, int]
-    unique_outline_shapes: dict[str, int]
-    unique_solid_shapes: dict[str, int]
-    fps: float
-    width: int
-    height: int
+    processing_time_seconds: float = 0.0
+    frame_count: int = 0
+    processed_frames: int = 0
+    duplicate_frames_skipped: int = 0
+    total_detections: int = 0
+    frame_detections: int = 0
+    unique_tracks: int = 0
+    passed: int = 0
+    failed: int = 0
+    colors: dict[str, int] | None = None
+    unique_colors: dict[str, int] | None = None
+    unique_shapes: dict[str, int] | None = None
+    unique_outline_shapes: dict[str, int] | None = None
+    unique_solid_shapes: dict[str, int] | None = None
+    fps: float = 0.0
+    width: int = 0
+    height: int = 0
 
 
 class VideoProcessor:
@@ -54,6 +56,7 @@ class VideoProcessor:
         output_path: Path,
         target_color: str | None = None,
     ) -> VideoSummary:
+        started_at = perf_counter()
         capture = cv2.VideoCapture(str(input_path))
         if not capture.isOpened():
             raise ValueError("Không thể mở file video")
@@ -211,6 +214,7 @@ class VideoProcessor:
             else:
                 failed += 1
         return VideoSummary(
+            processing_time_seconds=round(perf_counter() - started_at, 3),
             frame_count=frame_count,
             processed_frames=processed_frames,
             duplicate_frames_skipped=duplicate_frames_skipped,
@@ -307,6 +311,7 @@ class VideoProcessor:
             "green": "XANH LA",
             "blue": "XANH DUONG",
             "purple": "TIM",
+            "violet": "TIM DAM",
             "black": "DEN",
             "white": "TRANG",
             "gray": "XAM",
@@ -476,6 +481,7 @@ class VideoProcessor:
             "green": (40, 190, 70),
             "blue": (255, 150, 40),
             "purple": (220, 80, 180),
+            "violet": (160, 60, 190),
             "black": (170, 170, 170),
             "white": (245, 245, 245),
             "gray": (160, 160, 160),

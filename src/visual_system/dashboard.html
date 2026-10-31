@@ -378,7 +378,8 @@
             <option value="blue">Xanh dương</option>
             <option value="orange">Cam</option>
             <option value="yellow">Vàng</option>
-            <option value="purple">Tím</option>
+            <option value="purple">Tím hồng</option>
+            <option value="violet">Tím đậm</option>
             <option value="black">Đen</option>
             <option value="white">Trắng</option>
             <option value="gray">Xám</option>
@@ -447,7 +448,8 @@
   <script>
     const colorNames = {
       all: 'mọi màu', red: 'đỏ', green: 'xanh lá', blue: 'xanh dương', orange: 'cam',
-      yellow: 'vàng', purple: 'tím', black: 'đen', white: 'trắng', gray: 'xám'
+      yellow: 'vàng', purple: 'tím hồng', violet: 'tím đậm',
+      black: 'đen', white: 'trắng', gray: 'xám'
     };
     const shapeNames = {
       circle: 'hình tròn', oval: 'hình oval', triangle: 'tam giác', rectangle: 'hình chữ nhật',
@@ -568,6 +570,8 @@
         .map(([name, count]) => (shapeNames[name] || name) + ': ' + count)
         .join(', ') || 'Chưa có dữ liệu';
       document.getElementById('video-summary').innerHTML = `
+        <div class="metric"><span>Thời gian xử lý</span>
+          <strong>${Number(summary.processing_time_seconds ?? 0).toFixed(2)} s</strong></div>
         <div class="metric"><span>Số khung hình</span>
           <strong>${summary.processed_frames}</strong></div>
         <div class="metric"><span>Khung hình trùng hoàn toàn đã bỏ qua</span>

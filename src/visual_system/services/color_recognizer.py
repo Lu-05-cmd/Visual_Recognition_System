@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 
 from visual_system.models import Detection
+from visual_system.services.color_ranges import HSV_COLOR_RANGES
 
 
 class DominantColorRecognizer:
@@ -30,39 +31,27 @@ class DominantColorRecognizer:
         if crop.size == 0:
             return "unknown"
 
-        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        blurred = cv2.GaussianBlur(crop, (5, 5), 0)
+        hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
         sat = hsv[:, :, 1]
         val = hsv[:, :, 2]
 
-        valid = (sat >= cls.min_saturation) & (val >= cls.min_value)
-        if not np.any(valid):
-            if float(np.median(val)) < 45:
-                return "black"
-            if float(np.median(sat)) < 40:
-                return "white" if float(np.median(val)) > 180 else "gray"
-            return "unknown"
+        color_pixel_counts = {
+            color_name: sum(
+                cv2.countNonZero(cv2.inRange(hsv, lower, upper))
+                for lower, upper in ranges
+            )
+            for color_name, ranges in HSV_COLOR_RANGES.items()
+        }
+        color_name, pixel_count = max(
+            color_pixel_counts.items(),
+            key=lambda item: item[1],
+        )
+        if pixel_count > 80:
+            return color_name
 
-        hue_values = hsv[:, :, 0][valid]
-        saturation_values = sat[valid].astype(np.float32)
-        value_values = val[valid].astype(np.float32)
-        # Use the most populated hue range. Shadows can shift the median of a
-        # yellow object toward orange even when most of the object is yellow.
-        histogram, _ = np.histogram(hue_values, bins=180, range=(0, 180))
-        hue = float(np.argmax(histogram))
-        saturation = float(np.median(saturation_values))
-        value = float(np.median(value_values))
-        if value < cls.min_value:
+        if float(np.median(val)) < 45:
             return "black"
-        if saturation < cls.min_saturation:
-            return "white" if value > 180 else "gray"
-        if hue < 10 or hue >= 170:
-            return "red"
-        if hue < 22:
-            return "orange"
-        if hue < 40:
-            return "yellow"
-        if hue < 90:
-            return "green"
-        if hue < 140:
-            return "blue"
-        return "purple"
+        if float(np.median(sat)) < 40:
+            return "white" if float(np.median(val)) > 180 else "gray"
+        return "unknown"
